@@ -22,11 +22,29 @@ CMS_MAP = {
     "WordPress (WooCommerce)": "wordpress_default",
 }
 
-async def _fetch(client: httpx.AsyncClient, url: str, delay_ms: int) -> Tuple[int, str, str]:
+async def _fetch(client: httpx.AsyncClient, url: str, delay_ms: int, retries: int = 3) -> Tuple[int, str, str]:
     if delay_ms:
         await asyncio.sleep(delay_ms / 1000.0)
-    r = await client.get(url, follow_redirects=True, timeout=40.0)
-    return r.status_code, r.text, str(r.url)
+    
+    last_err = None
+    for attempt in range(retries):
+        try:
+            r = await client.get(url, follow_redirects=True, timeout=40.0)
+            if r.status_code in (429, 502, 503, 504) and attempt < retries - 1:
+                wait_time = (attempt + 1) * 2
+                await asyncio.sleep(wait_time)
+                continue
+            return r.status_code, r.text, str(r.url)
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                wait_time = (attempt + 1) * 2
+                await asyncio.sleep(wait_time)
+                continue
+    
+    if last_err:
+        raise last_err
+    return 500, "", url  # Fallback if both fail and last_err is none somehow
 
 def _cfg_for_choice(cms_choice: Optional[str]) -> Optional[SiteConfig]:
     if not cms_choice or cms_choice.startswith("Auto"):
@@ -490,6 +508,38 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                     
                     # 2) Fetch the actual product page (fallback or direct URL)
                     status, html, final_url = await _fetch(client, url, delay_ms)
+                    
+                    if status != 200:
+                        results.append({
+                            "sku": sku, "url": url, "product_url": None,
+                            "name": None, "category": None, "breadcrumbs": None,
+                            "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                            "error": f"HTTP {status}"
+                        })
+                        return
+
+                    try:
+                        cfg = _cfg_for_choice(cms_choice)
+                        if cfg:
+                            # Offload CPU-bound parsing to a thread
+                            data = await asyncio.wait_for(asyncio.to_thread(parse_product, html, final_url, cfg, sku), timeout=30)
+                        else:
+                            data = await asyncio.wait_for(asyncio.to_thread(auto_parser.parse_auto, html, final_url, sku), timeout=30)
+                        results.append(data)
+                    except asyncio.TimeoutError:
+                         results.append({
+                            "sku": sku, "url": url, "product_url": final_url,
+                            "name": None, "category": None, "breadcrumbs": None,
+                            "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                            "error": "Parse Timeout (30s)",
+                        })
+                    except Exception as e:
+                        results.append({
+                            "sku": sku, "url": url, "product_url": final_url,
+                            "name": None, "category": None, "breadcrumbs": None,
+                            "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                            "error": f"Parse error: {e}",
+                        })
                 except Exception as e:
                     results.append({
                         "sku": sku, "url": url, "product_url": None,
@@ -498,39 +548,6 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                         "error": f"Request failed: {e}"
                     })
                     return
-            if status != 200:
-                results.append({
-                    "sku": sku, "url": url, "product_url": None,
-                    "name": None, "category": None, "breadcrumbs": None,
-                    "price": None, "rrp": None, "discount_percent": None, "image_url": None,
-                    "error": f"HTTP {status}"
-                })
-                return
-
-
-
-            try:
-                cfg = _cfg_for_choice(cms_choice)
-                if cfg:
-                    # Offload CPU-bound parsing to a thread
-                    data = await asyncio.wait_for(asyncio.to_thread(parse_product, html, final_url, cfg, sku), timeout=30)
-                else:
-                    data = await asyncio.wait_for(asyncio.to_thread(auto_parser.parse_auto, html, final_url, sku), timeout=30)
-                results.append(data)
-            except asyncio.TimeoutError:
-                 results.append({
-                    "sku": sku, "url": url, "product_url": final_url,
-                    "name": None, "category": None, "breadcrumbs": None,
-                    "price": None, "rrp": None, "discount_percent": None, "image_url": None,
-                    "error": "Parse Timeout (30s)",
-                })
-            except Exception as e:
-                results.append({
-                    "sku": sku, "url": url, "product_url": final_url,
-                    "name": None, "category": None, "breadcrumbs": None,
-                    "price": None, "rrp": None, "discount_percent": None, "image_url": None,
-                    "error": f"Parse error: {e}",
-                })
 
 
         await asyncio.gather(*(handle(r) for r in items))

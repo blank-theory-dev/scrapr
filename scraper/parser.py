@@ -565,37 +565,34 @@ def _extract_discount_badge(soup: BeautifulSoup, config: Optional[SiteConfig] = 
                     except ValueError:
                         pass
     
-    # 1. Fallback: Look for specific badge class names (requires cleanup to avoid false positives)
-    # Clone soup only now
-    soup_copy = BeautifulSoup(str(soup), "lxml")
-    for nav in soup_copy.find_all(['nav', 'breadcrumb']):
-        nav.decompose()
-    for elem in soup_copy.find_all(class_=re.compile(r'breadcrumb|navigation', re.I)):
-        elem.decompose()
-    
+    # 1. Fallback: Look for specific badge class names
     for class_name in ["c-badge__item--percentage-off", "percentage-off", "discount-badge", "sale-badge", "badge--sale", "product-badge"]:
-        badge = soup_copy.find(class_=re.compile(class_name, re.I))
-        if badge:
+        for badge in soup.find_all(class_=re.compile(class_name, re.I)):
+            # Skip if inside nav/breadcrumb
+            parent = badge.find_parent(['nav'])
+            parent_class = badge.find_parent(class_=re.compile(r'breadcrumb|navigation', re.I))
+            if parent or parent_class: continue
+            
             text = badge.get_text(strip=True)
-            # Match "50% OFF" or "-50%"
             m = re.search(r'(\d+(?:\.\d+)?)%', text)
             if m:
-                try:
-                    return float(m.group(1))
-                except ValueError:
-                    pass
+                try: return float(m.group(1))
+                except ValueError: pass
     
     # 2. Look for text containing "% OFF" in product area only
-    # Limit search to main/product containers
-    product_area = soup_copy.find(['main', 'article']) or soup_copy.find(class_=re.compile(r'product|item', re.I)) or soup_copy
+    product_area = soup.find(['main', 'article']) or soup.find(class_=re.compile(r'product|item', re.I)) or soup
     
     for elem in product_area.find_all(string=re.compile(r'\d+%\s*OFF', re.I)):
+        parent_tag = getattr(elem, "parent", None)
+        if parent_tag:
+            parent = parent_tag.find_parent(['nav'])
+            parent_class = parent_tag.find_parent(class_=re.compile(r'breadcrumb|navigation', re.I))
+            if parent or parent_class: continue
+        
         m = re.search(r'(\d+(?:\.\d+)?)%', elem)
         if m:
-            try:
-                return float(m.group(1))
-            except ValueError:
-                pass
+            try: return float(m.group(1))
+            except ValueError: pass
 
     return None
 
