@@ -132,7 +132,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.0.1`")
+    st.markdown("`v1.0.2`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
     # Sidebar for configuration
@@ -148,9 +148,9 @@ def main():
             index=1  # Default to Shopify
         )
         
-        # Hardcoded defaults since UI controls are removed
-        concurrency = 5
-        delay_ms = 0
+        # Hardcoded defaults to ensure server stability
+        concurrency = 3
+        delay_ms = 250
         
         fast_mode = False
         if cms_choice == "Shopify":
@@ -255,16 +255,15 @@ def main():
                 if col not in df.columns:
                     df[col] = None
 
-            # Ensure all_variant_ids is string to avoid Arrow errors
-            if "all_variant_ids" in df.columns:
-                df["all_variant_ids"] = df["all_variant_ids"].astype(str)
+            # Drop unwanted columns if they exist
+            unwanted = ["group_id", "variant_id", "all_variant_ids", "error", "all_skus"]
+            df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Reorder columns if possible
             preferred = ["sku", "product_url", "name", "price", "rrp", "discount_percent", 
-                       "group_id", "variant_id", "all_variant_ids",
                        "category", "breadcrumbs", "image_url", 
                        "image_url_2", "image_url_3", "image_url_4", "image_url_5",
-                       "error", "url"]
+                       "url"]
             cols = [c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]
             df = df[cols]
 
@@ -329,6 +328,10 @@ def main():
                 col = f"image_url_{i}"
                 if col not in df.columns:
                     df[col] = None
+
+            # Drop unwanted columns if they exist
+            unwanted = ["group_id", "variant_id", "all_variant_ids", "error", "all_skus"]
+            df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Column selection
             st.write("### Export Options")
