@@ -132,7 +132,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.0.2`")
+    st.markdown("`v1.0.3`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
     # Sidebar for configuration
@@ -149,8 +149,8 @@ def main():
         )
         
         # Hardcoded defaults to ensure server stability
-        concurrency = 3
-        delay_ms = 250
+        concurrency = 2
+        delay_ms = 400
         
         fast_mode = False
         if cms_choice == "Shopify":

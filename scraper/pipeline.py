@@ -22,7 +22,9 @@ CMS_MAP = {
     "WordPress (WooCommerce)": "wordpress_default",
 }
 
-async def _fetch(client: httpx.AsyncClient, url: str, delay_ms: int, retries: int = 3) -> Tuple[int, str, str]:
+import random
+
+async def _fetch(client: httpx.AsyncClient, url: str, delay_ms: int, retries: int = 5) -> Tuple[int, str, str]:
     if delay_ms:
         await asyncio.sleep(delay_ms / 1000.0)
     
@@ -30,8 +32,8 @@ async def _fetch(client: httpx.AsyncClient, url: str, delay_ms: int, retries: in
     for attempt in range(retries):
         try:
             r = await client.get(url, follow_redirects=True, timeout=40.0)
-            if r.status_code in (429, 502, 503, 504) and attempt < retries - 1:
-                wait_time = (attempt + 1) * 2
+            if r.status_code in (403, 429, 502, 503, 504) and attempt < retries - 1:
+                wait_time = (attempt + 1) * 3 + random.uniform(0.5, 2.0)
                 await asyncio.sleep(wait_time)
                 continue
             return r.status_code, r.text, str(r.url)
@@ -322,9 +324,15 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
             print(f"Catalog indexing failed: {e}")
             indexer = None
 
-    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
-    headers = {"user-agent": "Mozilla/5.0 SKU-Scraper/3.1 (+https://example.com)"}
-    async with httpx.AsyncClient(limits=limits, headers=headers) as client:
+    # Disable keepalive to prevent WooCommerce/Neto from randomly dropping reused connections
+    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=0)
+    headers = {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+        "connection": "close"
+    }
+    async with httpx.AsyncClient(limits=limits, headers=headers, http2=False) as client:
         sem = asyncio.Semaphore(concurrency)
 
         async def handle(row: Dict[str, Optional[str]]):
@@ -559,12 +567,18 @@ async def scrape_by_page(page_url: str,
                          max_items: int,
                          concurrency: int,
                          delay_ms: int) -> List[Dict]:
-    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
-    headers = {"user-agent": "Mozilla/5.0 SKU-Scraper/3.1 (+https://example.com)"}
+    # Disable keepalive for page crawler as well
+    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=0)
+    headers = {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+        "connection": "close"
+    }
     cfg_key = _cfg_key_for_choice(cms_choice)
     cfg = SITE_CONFIGS.get(cfg_key) if cfg_key else None
 
-    async with httpx.AsyncClient(limits=limits, headers=headers) as client:
+    async with httpx.AsyncClient(limits=limits, headers=headers, http2=False) as client:
         status, html, final_url = await _fetch(client, page_url, delay_ms)
         if status != 200:
             return [{
