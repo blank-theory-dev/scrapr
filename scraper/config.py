@@ -25,7 +25,7 @@ class SiteConfig:
 SITE_CONFIGS: Dict[str, SiteConfig] = {
     "neto_default": SiteConfig(
         base_domain="neto.generic",
-        sku_selector="[itemprop='sku'], .sku, .product-sku, span[itemprop='sku']",
+        sku_selector="[itemprop='sku'], [itemprop='productID'], .sku, .product-sku, span[itemprop='sku']",
         sku_js_pattern=r"k4n\s*=\s*\{.*?sku\s*:\s*[\"']([^\"']+)[\"']",
         price_js_pattern=r"k4n\s*=\s*\{.*?price\s*:\s*[\"']([\d\.,]+)[\"']",
         price_selector=(

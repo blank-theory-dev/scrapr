@@ -44,20 +44,20 @@ async def _fetch(client: httpx.AsyncClient, url: str, delay_ms: int, retries: in
                 await asyncio.sleep(wait_time)
                 continue
     
-    if last_err:
+    if last_err is not None:
         raise last_err
     return 500, "", url  # Fallback if both fail and last_err is none somehow
 
 def _cfg_for_choice(cms_choice: Optional[str]) -> Optional[SiteConfig]:
     if not cms_choice or cms_choice.startswith("Auto"):
         return None
-    key = CMS_MAP.get(cms_choice)
-    return SITE_CONFIGS.get(key) if key else None
+    key = CMS_MAP.get(str(cms_choice))
+    return SITE_CONFIGS.get(str(key)) if key else None
 
 def _cfg_key_for_choice(cms_choice: Optional[str]) -> Optional[str]:
     if not cms_choice or cms_choice.startswith("Auto"):
         return None
-    return CMS_MAP.get(cms_choice)
+    return CMS_MAP.get(str(cms_choice))
 
 def _build_url_for_sku(sku: Optional[str], url: Optional[str],
                        cms_choice: Optional[str], origin: Optional[str],
@@ -266,7 +266,7 @@ def _jsonld_product_urls(soup: BeautifulSoup, base_url: str) -> list[str]:
             seen.add(u); out.append(u)
     return out
 
-def _find_product_links(soup: BeautifulSoup, base_url: str, config_name: str) -> List[str]:
+def _find_product_links(soup: BeautifulSoup, base_url: str, config_name: Optional[str]) -> List[str]:
     sel = _product_link_selectors(config_name)
     seen, links = set(), []
     for s in sel:
@@ -475,7 +475,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                                         p_val = float(p)
                                         r_val = float(r)
                                         if r_val > 0:
-                                            data["discount_percent"] = round((1 - (p_val / r_val)) * 100, 2)
+                                            data["discount_percent"] = round(float((1 - (p_val / r_val)) * 100), 2)
                                     except Exception:
                                         pass
 
