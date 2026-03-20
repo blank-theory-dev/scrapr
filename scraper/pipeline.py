@@ -325,14 +325,14 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
             indexer = None
 
     # Disable keepalive to prevent WooCommerce/Neto from randomly dropping reused connections
-    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=0)
+    limits = httpx.Limits(max_connections=concurrency)
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
         "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "accept-language": "en-US,en;q=0.9",
         "connection": "close"
     }
-    async with httpx.AsyncClient(limits=limits, headers=headers, http2=False) as client:
+    async with httpx.AsyncClient(limits=limits, headers=headers) as client:
         sem = asyncio.Semaphore(concurrency)
 
         async def handle(row: Dict[str, Optional[str]]):
@@ -568,7 +568,7 @@ async def scrape_by_page(page_url: str,
                          concurrency: int,
                          delay_ms: int) -> List[Dict]:
     # Disable keepalive for page crawler as well
-    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=0)
+    limits = httpx.Limits(max_connections=concurrency)
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
         "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -578,7 +578,7 @@ async def scrape_by_page(page_url: str,
     cfg_key = _cfg_key_for_choice(cms_choice)
     cfg = SITE_CONFIGS.get(cfg_key) if cfg_key else None
 
-    async with httpx.AsyncClient(limits=limits, headers=headers, http2=False) as client:
+    async with httpx.AsyncClient(limits=limits, headers=headers) as client:
         status, html, final_url = await _fetch(client, page_url, delay_ms)
         if status != 200:
             return [{
