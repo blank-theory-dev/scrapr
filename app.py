@@ -132,7 +132,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.0.4`")
+    st.markdown("`v1.0.5`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
     # Sidebar for configuration
@@ -256,7 +256,7 @@ def main():
                     df[col] = None
 
             # Drop unwanted columns if they exist
-            unwanted = ["group_id", "variant_id", "all_variant_ids", "error", "all_skus"]
+            unwanted = ["error", "all_skus"]
             df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Reorder columns if possible
@@ -330,7 +330,7 @@ def main():
                     df[col] = None
 
             # Drop unwanted columns if they exist
-            unwanted = ["group_id", "variant_id", "all_variant_ids", "error", "all_skus"]
+            unwanted = ["error", "all_skus"]
             df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Column selection
