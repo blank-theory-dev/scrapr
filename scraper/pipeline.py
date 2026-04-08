@@ -342,6 +342,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
             if not url:
                 results.append({
                     "sku": sku, "url": url_in, "product_url": None,
+                    "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                     "name": None, "category": None, "breadcrumbs": None,
                     "price": None, "rrp": None, "discount_percent": None, "image_url": None,
                     "error": "No URL could be constructed (supply URL or pattern)."
@@ -356,6 +357,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                         if not catalog_data:
                             results.append({
                                 "sku": sku, "url": url_in, "product_url": None,
+                                "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                                 "name": None, "category": None, "breadcrumbs": None,
                                 "price": None, "rrp": None, "discount_percent": None, "image_url": None,
                                 "error": "Strict match failed: SKU not found in site catalog."
@@ -520,6 +522,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                     if status != 200:
                         results.append({
                             "sku": sku, "url": url, "product_url": None,
+                            "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                             "name": None, "category": None, "breadcrumbs": None,
                             "price": None, "rrp": None, "discount_percent": None, "image_url": None,
                             "error": f"HTTP {status}"
@@ -537,6 +540,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                     except asyncio.TimeoutError:
                          results.append({
                             "sku": sku, "url": url, "product_url": final_url,
+                            "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                             "name": None, "category": None, "breadcrumbs": None,
                             "price": None, "rrp": None, "discount_percent": None, "image_url": None,
                             "error": "Parse Timeout (30s)",
@@ -544,6 +548,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                     except Exception as e:
                         results.append({
                             "sku": sku, "url": url, "product_url": final_url,
+                            "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                             "name": None, "category": None, "breadcrumbs": None,
                             "price": None, "rrp": None, "discount_percent": None, "image_url": None,
                             "error": f"Parse error: {e}",
@@ -551,6 +556,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                 except Exception as e:
                     results.append({
                         "sku": sku, "url": url, "product_url": None,
+                        "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                         "name": None, "category": None, "breadcrumbs": None,
                         "price": None, "rrp": None, "discount_percent": None, "image_url": None,
                         "error": f"Request failed: {e}"
