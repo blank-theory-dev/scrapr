@@ -36,10 +36,10 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
             ".woocommerce-Price-amount"
         ),
         sale_price_selector=(
-            ".productsaleprice, .sale-price, .price--sale, .special-price, .price-now"
+            ".productpromo, .productsaleprice, .sale-price, .price--sale, .special-price, .price-now"
         ),
         rrp_selector=(
-            ".productrrp, .rrp, .was-price, .price .compare, .compare-at"
+            ".productwasprice, .productrrp, .rrp, .was-price, .price .compare, .compare-at"
         ),
         image_selector=(
             "a[data-lightbox='product-lightbox'], "
