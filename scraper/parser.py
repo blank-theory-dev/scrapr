@@ -638,6 +638,13 @@ def parse_product(html: str, url: str, config: SiteConfig, sku: Optional[str] = 
         sale_price = _extract_sale_price(soup, config)
         rrp = _extract_rrp(soup, config)
         
+        # Adjust price and rrp if sale_price is present
+        if sale_price is not None:
+            if price is not None and sale_price < price:
+                if not rrp or rrp < price:
+                    rrp = price
+            price = sale_price
+        
         # Multi-image extraction
         all_images = _extract_all_images(soup, config, url)
         image_url = all_images[0] if all_images else None
@@ -652,7 +659,7 @@ def parse_product(html: str, url: str, config: SiteConfig, sku: Optional[str] = 
         discount = _extract_discount_badge(soup, config)
         
         # If badge extraction failed, try calculating from price/rrp
-        if discount is None and price is not None and rrp is not None and rrp > 0:
+        if discount is None and price is not None and rrp is not None and rrp > 0 and price < rrp:
             discount = round((1 - (price / rrp)) * 100, 2)
 
         result = {
