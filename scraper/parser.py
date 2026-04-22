@@ -138,6 +138,34 @@ def _extract_rrp(soup: BeautifulSoup, config: SiteConfig) -> Optional[float]:
                 if p: return p
     return None
 
+def _extract_sale_price(soup: BeautifulSoup, config: SiteConfig) -> Optional[float]:
+    if config and getattr(config, 'sale_price_js_pattern', None):
+        for s in soup.find_all("script"):
+            if not s.string: continue
+            m = re.search(config.sale_price_js_pattern, s.string, re.DOTALL | re.IGNORECASE)
+            if m:
+                try:
+                    return float(m.group(1).replace(",", "").strip())
+                except ValueError:
+                    pass
+
+    for s in soup.find_all("script"):
+        if s.string and "var item" in s.string:
+            m = re.search(r'SalePrice\s*:\s*"([^"]+)"', s.string)
+            if m:
+                p = _clean_amount(m.group(1))
+                if p: return p
+
+    if getattr(config, 'sale_price_selector', None):
+        for sel in config.sale_price_selector.split(","):
+            el = soup.select_one(sel.strip())
+            if el:
+                val = el.get("content") or el.get_text(strip=True)
+                p = _clean_amount(val)
+                if p: return p
+    return None
+
+
 def _extract_image(soup: BeautifulSoup, config: SiteConfig, base_url: str) -> Optional[str]:
     base_domain = _origin_from_url(base_url).replace("https://", "").replace("http://", "")
     
@@ -607,7 +635,7 @@ def parse_product(html: str, url: str, config: SiteConfig, sku: Optional[str] = 
         category = breadcrumbs[-2] if len(breadcrumbs) >= 2 else (breadcrumbs[-1] if breadcrumbs else None)
 
         price = _extract_price(soup, config)
-        rrp = _extract_rrp(soup, config)
+        sale_price = _extract_sale_price(soup, config)
         rrp = _extract_rrp(soup, config)
         
         # Multi-image extraction
@@ -639,6 +667,7 @@ def parse_product(html: str, url: str, config: SiteConfig, sku: Optional[str] = 
             "category": category,
             "breadcrumbs": " > ".join(breadcrumbs) if breadcrumbs else None,
             "price": price,
+            "sale_price": sale_price,
             "rrp": rrp,
             "discount_percent": discount,
             "image_url": image_url,
@@ -664,6 +693,7 @@ def parse_product(html: str, url: str, config: SiteConfig, sku: Optional[str] = 
             "category": None,
             "breadcrumbs": None,
             "price": None,
+            "sale_price": None,
             "rrp": None,
             "discount_percent": None,
             "image_url": None,

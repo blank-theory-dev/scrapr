@@ -344,7 +344,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                     "sku": sku, "url": url_in, "product_url": None,
                     "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                     "name": None, "category": None, "breadcrumbs": None,
-                    "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                    "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
                     "error": "No URL could be constructed (supply URL or pattern)."
                 })
                 return
@@ -359,7 +359,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                                 "sku": sku, "url": url_in, "product_url": None,
                                 "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                                 "name": None, "category": None, "breadcrumbs": None,
-                                "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                                "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
                                 "error": "Strict match failed: SKU not found in site catalog."
                             })
                             return
@@ -393,6 +393,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                                 "category": catalog_data.get("product_type"),
                                 "breadcrumbs": None, # Not available in fast mode
                                 "price": price,
+                                "sale_price": catalog_data.get("sale_price"),
                                 "rrp": rrp,
                                 "discount_percent": discount,
                                 "image_url": catalog_data.get("image_url"),
@@ -418,6 +419,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                                 "category": catalog_data.get("product_type"),
                                 "breadcrumbs": None,
                                 "price": price,
+                                "sale_price": catalog_data.get("sale_price"),
                                 "rrp": rrp,
                                 "discount_percent": discount,
                                 "image_url": catalog_data.get("image_url"),
@@ -444,6 +446,8 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                             # If parser missed price, use catalog price
                             if not data.get("price"):
                                 data["price"] = catalog_data.get("price")
+                            if not data.get("sale_price"):
+                                data["sale_price"] = catalog_data.get("sale_price")
                             if not data.get("rrp"):
                                 data["rrp"] = catalog_data.get("rrp")
                             if not data.get("image_url"):
@@ -495,6 +499,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                                 "category": catalog_data.get("product_type"),
                                 "breadcrumbs": None,
                                 "price": catalog_data.get("price"),
+                                "sale_price": catalog_data.get("sale_price"),
                                 "rrp": catalog_data.get("rrp"),
                                 "discount_percent": None,
                                 "image_url": catalog_data.get("image_url"),
@@ -524,7 +529,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                             "sku": sku, "url": url, "product_url": None,
                             "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                             "name": None, "category": None, "breadcrumbs": None,
-                            "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                            "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
                             "error": f"HTTP {status}"
                         })
                         return
@@ -542,7 +547,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                             "sku": sku, "url": url, "product_url": final_url,
                             "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                             "name": None, "category": None, "breadcrumbs": None,
-                            "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                            "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
                             "error": "Parse Timeout (30s)",
                         })
                     except Exception as e:
@@ -550,7 +555,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                             "sku": sku, "url": url, "product_url": final_url,
                             "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                             "name": None, "category": None, "breadcrumbs": None,
-                            "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                            "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
                             "error": f"Parse error: {e}",
                         })
                 except Exception as e:
@@ -558,7 +563,7 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                         "sku": sku, "url": url, "product_url": None,
                         "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                         "name": None, "category": None, "breadcrumbs": None,
-                        "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                        "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
                         "error": f"Request failed: {e}"
                     })
                     return
@@ -590,7 +595,7 @@ async def scrape_by_page(page_url: str,
             return [{
                 "product_url": page_url,
                 "name": None, "category": None, "breadcrumbs": None,
-                "price": None, "rrp": None, "discount_percent": None, "image_url": None,
+                "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
                 "error": f"HTTP {status}"
             }]
 

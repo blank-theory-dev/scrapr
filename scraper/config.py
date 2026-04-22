@@ -10,6 +10,7 @@ class SiteConfig:
     base_domain: str
     url_pattern: Optional[str] = None
     price_selector: Optional[str] = None
+    sale_price_selector: Optional[str] = None
     rrp_selector: Optional[str] = None
     image_selector: Optional[str] = None
     discount_selector: Optional[str] = None
@@ -19,6 +20,7 @@ class SiteConfig:
     sku_selector: Optional[str] = None
     sku_js_pattern: Optional[str] = None
     price_js_pattern: Optional[str] = None
+    sale_price_js_pattern: Optional[str] = None
     price_regex: Pattern = re.compile(r"[\d\.,]+")
     rrp_regex: Pattern = re.compile(r"[\d\.,]+")
 
@@ -32,6 +34,9 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
             ".h1[itemprop='price'], [itemprop='price'], "
             ".productpricetext, .price .amount, .summary .price, "
             ".woocommerce-Price-amount"
+        ),
+        sale_price_selector=(
+            ".productsaleprice, .sale-price, .price--sale, .special-price, .price-now"
         ),
         rrp_selector=(
             ".productrrp, .rrp, .was-price, .price .compare, .compare-at"
@@ -72,6 +77,9 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
             ".price-item--sale, .price-item--regular, .product__price, .price .amount, "
             "#ProductPrice-product-template, .product-single__price, .current_price"
         ),
+        sale_price_selector=(
+            ".price-item--sale, .product__price--sale, .sale-price, .special-price, .price--on-sale .price-item--sale"
+        ),
         # RRP: compare-at prices, strikethrough elements
         rrp_selector=(
             ".price__compare, .price--compare, .compare-at, .product-single__price--compare-at, "
@@ -103,6 +111,7 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
     "wordpress_default": SiteConfig(
         base_domain="woo.generic",
         price_selector=(".summary .price, .woocommerce-Price-amount"),
+        sale_price_selector=(".price ins .amount, .price .woocommerce-Price-currencySymbol + ins .amount, .sale-price"),
         rrp_selector=(".price del .amount, .price .woocommerce-Price-currencySymbol + del .amount"),
         image_selector=("meta[property='og:image'], img.wp-post-image, .woocommerce-product-gallery__image img"),
         discount_selector=(".onsale, .badge--sale"),

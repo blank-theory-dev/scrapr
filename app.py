@@ -132,7 +132,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.0.6`")
+    st.markdown("`v1.0.7`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
     # Sidebar for configuration
@@ -260,7 +260,7 @@ def main():
             df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Reorder columns if possible
-            preferred = ["sku", "product_url", "name", "price", "rrp", "discount_percent", 
+            preferred = ["sku", "product_url", "name", "price", "sale_price", "rrp", "discount_percent", 
                        "category", "breadcrumbs", "image_url", 
                        "image_url_2", "image_url_3", "image_url_4", "image_url_5",
                        "url"]
