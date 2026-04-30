@@ -1,13 +1,16 @@
-import httpx
 import asyncio
 import logging
+import json
+from curl_cffi import requests
+from urllib.parse import urlparse
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
 class ShopifyCatalogIndexer:
     def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip("/")
+        p = urlparse(base_url)
+        self.base_url = f"{p.scheme}://{p.netloc}"
         self.products_url = f"{self.base_url}/products.json"
         self.catalog: Dict[str, Dict[str, Any]] = {}
         self.product_variants: Dict[int, List[int]] = {} # product_id -> list of variant_ids
@@ -22,7 +25,7 @@ class ShopifyCatalogIndexer:
         page = 1
         total_skus = 0
         
-        async with httpx.AsyncClient() as client:
+        async with requests.AsyncSession(impersonate="chrome") as client:
             while True:
                 try:
                     url = f"{self.products_url}?limit={limit_per_page}&page={page}"
