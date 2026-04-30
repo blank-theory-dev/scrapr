@@ -164,7 +164,7 @@ def main():
             st.success("Cache cleared!")
 
     if mode == "SKUs":
-        origin = st.text_input("Base URL (Origin)", "https://legear.com.au")
+        origin = st.text_input("Base URL (Origin)", "https://legear.com.au").strip()
         # url_pattern removed as per request
         url_pattern = "" 
 
@@ -242,7 +242,11 @@ def main():
             
                 st.session_state['sku_results'] = results
             
-            st.success(f"Completed! Processed {len(results)} items.")
+            errors_count = sum(1 for r in results if r.get('error'))
+            if errors_count > 0:
+                st.warning(f"Completed with errors! {errors_count} items failed to scrape. Check the 'error' column in the table below for details.")
+            else:
+                st.success(f"Completed! Processed {len(results)} items.")
             
         # Display results from session state if available
         if 'sku_results' in st.session_state and st.session_state['sku_results']:
@@ -260,7 +264,7 @@ def main():
             df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Reorder columns if possible
-            preferred = ["sku", "product_url", "name", "price", "sale_price", "rrp", "discount_percent", 
+            preferred = ["sku", "error", "product_url", "name", "price", "sale_price", "rrp", "discount_percent", 
                        "category", "breadcrumbs", "image_url", 
                        "image_url_2", "image_url_3", "image_url_4", "image_url_5",
                        "url"]
