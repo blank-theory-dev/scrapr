@@ -13,12 +13,28 @@ from scraper.pipeline import scrape_items, scrape_by_page
 from scraper.config import SITE_CONFIGS
 
 def _run(coro):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coro)
+    import threading
+    result = None
+    exception = None
+
+    def worker():
+        nonlocal result, exception
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(coro)
+        except Exception as e:
+            exception = e
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    if exception:
+        raise exception
+    return result
 
 def _normalise_rows(rows: List[Dict[str, Optional[str]]]) -> List[Dict[str, Optional[str]]]:
     seen = set()
@@ -152,12 +168,12 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.1`")
+    st.markdown("`v1.2`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
     # Sidebar for configuration
     with st.sidebar:
-        st.image("assets/logo.png", use_column_width=True)
+        st.image("assets/logo.png", use_container_width=True)
 
 
         mode = st.radio("Mode", ["SKUs", "Page Crawler"])
@@ -184,7 +200,7 @@ def main():
             st.success("Cache cleared!")
 
     if mode == "SKUs":
-        origin = st.text_input("Base URL (Origin)", "https://legear.com.au")
+        origin = st.text_input("Base URL (Origin)", "https://legear.com.au").strip()
         # url_pattern removed as per request
         url_pattern = "" 
 
@@ -276,7 +292,7 @@ def main():
                     df[col] = None
 
             # Drop unwanted columns if they exist
-            unwanted = ["error", "all_skus"]
+            unwanted = ["all_skus"]
             df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Reorder columns if possible
