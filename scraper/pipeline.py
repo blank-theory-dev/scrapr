@@ -519,12 +519,16 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
                     status, html, final_url = await _fetch(client, url, delay_ms)
                     
                     if status != 200:
+                        error_msg = f"HTTP {status}"
+                        if html:
+                            snippet = html[:100].replace('\n', ' ').strip()
+                            error_msg = f"HTTP {status} - {snippet}..."
                         results.append({
                             "sku": sku, "url": url, "product_url": None,
                             "group_id": None, "variant_id": None, "all_variant_ids": [], "all_skus": [],
                             "name": None, "category": None, "breadcrumbs": None,
                             "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
-                            "error": f"HTTP {status}"
+                            "error": error_msg
                         })
                         return
 
@@ -579,11 +583,16 @@ async def scrape_by_page(page_url: str,
     async with requests.AsyncSession(impersonate="chrome") as client:
         status, html, final_url = await _fetch(client, page_url, delay_ms)
         if status != 200:
+            error_msg = f"HTTP {status}"
+            if html:
+                # Include a small snippet of the response body to confirm Cloudflare block
+                snippet = html[:100].replace('\n', ' ').strip()
+                error_msg = f"HTTP {status} - {snippet}..."
             return [{
                 "product_url": page_url,
                 "name": None, "category": None, "breadcrumbs": None,
                 "price": None, "sale_price": None, "rrp": None, "discount_percent": None, "image_url": None,
-                "error": f"HTTP {status}"
+                "error": error_msg
             }]
 
         soup = BeautifulSoup(html, "lxml")
