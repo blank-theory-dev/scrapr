@@ -325,13 +325,8 @@ async def scrape_items(items: List[Dict[str, Optional[str]]],
             indexer = None
 
     # Disable keepalive to prevent WooCommerce/Neto from randomly dropping reused connections
-    headers = {
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-        "connection": "close"
-    }
-    async with requests.AsyncSession(impersonate="chrome", headers=headers) as client:
+    # We omit custom headers so curl_cffi can perfectly match its impersonate fingerprint
+    async with requests.AsyncSession(impersonate="chrome") as client:
         sem = asyncio.Semaphore(concurrency)
 
         async def handle(row: Dict[str, Optional[str]]):
@@ -578,17 +573,10 @@ async def scrape_by_page(page_url: str,
                          concurrency: int,
                          delay_ms: int) -> List[Dict]:
     # Disable keepalive for page crawler as well
-    headers = {
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-        "connection": "close"
-    }
-
     cfg_key = _cfg_key_for_choice(cms_choice)
     cfg = SITE_CONFIGS.get(cfg_key) if cfg_key else None
 
-    async with requests.AsyncSession(impersonate="chrome", headers=headers) as client:
+    async with requests.AsyncSession(impersonate="chrome") as client:
         status, html, final_url = await _fetch(client, page_url, delay_ms)
         if status != 200:
             return [{
