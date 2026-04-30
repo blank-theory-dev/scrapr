@@ -132,7 +132,7 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.0.7`")
+    st.markdown("`v1.0.8`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
     # Sidebar for configuration
@@ -145,7 +145,7 @@ def main():
         cms_choice = st.selectbox(
             "CMS / Site Type",
             ["Neto", "Shopify", "WordPress (WooCommerce)"],
-            index=1  # Default to Shopify
+            index=0  # Default to Neto
         )
         
         # Hardcoded defaults to ensure server stability
@@ -256,7 +256,7 @@ def main():
                     df[col] = None
 
             # Drop unwanted columns if they exist
-            unwanted = ["error", "all_skus"]
+            unwanted = ["all_skus"]
             df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Reorder columns if possible
