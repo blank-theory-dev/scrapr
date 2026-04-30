@@ -13,28 +13,12 @@ from scraper.pipeline import scrape_items, scrape_by_page
 from scraper.config import SITE_CONFIGS
 
 def _run(coro):
-    import threading
-    result = None
-    exception = None
-
-    def worker():
-        nonlocal result, exception
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(coro)
-        except Exception as e:
-            exception = e
-        finally:
-            loop.close()
-
-    t = threading.Thread(target=worker)
-    t.start()
-    t.join()
-
-    if exception:
-        raise exception
-    return result
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 def _normalise_rows(rows: List[Dict[str, Optional[str]]]) -> List[Dict[str, Optional[str]]]:
     seen = set()
@@ -60,34 +44,15 @@ def main():
     # Custom CSS for "Premium" look
     st.markdown("""
     <style>
-    @font-face {
-        font-family: 'Hedvig';
-        src:url(https://www.blanktheory.com.au/content/themes/blank-theory/dist/css/typography/fonts/Hedvig/Hedvig.woff2) format("woff2"),
-            url(https://www.blanktheory.com.au/content/themes/blank-theory/dist/css/typography/fonts/Hedvig/Hedvig.woff) format("woff");
-        font-weight:normal;
-        font-style:normal;
-    }
-    @font-face {
-        font-family: 'Switz';
-        src:url(https://www.blanktheory.com.au/content/themes/blank-theory/dist/css/typography/fonts/Switzer/Switzer-Regular.woff2) format("woff2"),
-            url(https://www.blanktheory.com.au/content/themes/blank-theory/dist/css/typography/fonts/Switzer/Switzer-Regular.woff) format("woff");
-        font-weight:400;
-        font-style:normal;
-    }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
 
     html, body, [class*="css"]  {
-        font-family: 'Switz', sans-serif;
-    }
-    
-    ::selection {
-        background-color: #E66143;
-        color: white;
+        font-family: 'Inter', sans-serif;
     }
 
     /* Titles */
     h1, h2, h3 {
         color: var(--text-color);
-        font-family: 'Hedvig', serif;
     }
     h1 {
         font-weight: 700;
@@ -101,19 +66,18 @@ def main():
 
     /* Buttons */
     .stButton>button {
-        background: #E66143;
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
         color: white;
         border-radius: 8px;
         border: none;
         padding: 0.6rem 1.2rem;
         font-weight: 600;
-        box-shadow: 0 4px 6px -1px rgba(230, 97, 67, 0.2), 0 2px 4px -1px rgba(230, 97, 67, 0.1);
+        box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2), 0 2px 4px -1px rgba(79, 70, 229, 0.1);
         transition: all 0.2s ease;
     }
     .stButton>button:hover {
-        background: #d55336;
-        color: white;
-        box-shadow: 0 10px 15px -3px rgba(230, 97, 67, 0.3), 0 4px 6px -2px rgba(230, 97, 67, 0.15);
+        background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3), 0 4px 6px -2px rgba(79, 70, 229, 0.15);
         transform: translateY(-1px);
     }
     .stButton>button:active {
@@ -128,8 +92,8 @@ def main():
         border-radius: 8px;
     }
     .stTextInput>div>div>input:focus, .stTextArea>div>div>textarea:focus {
-        border-color: #E66143;
-        box-shadow: 0 0 0 1px #E66143;
+        border-color: #6366f1;
+        box-shadow: 0 0 0 1px #6366f1;
     }
 
     /* Sidebar - Streamlit handles background, we just refine borders */
@@ -159,21 +123,21 @@ def main():
         opacity: 0.7;
     }
     .stTabs [aria-selected="true"] {
-        color: #E66143;
+        color: #6366f1;
         opacity: 1;
-        border-bottom-color: #E66143;
+        border-bottom-color: #6366f1;
     }
 
     </style>
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.2`")
+    st.markdown("`v1.0.7`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
     # Sidebar for configuration
     with st.sidebar:
-        st.image("assets/logo.png", use_container_width=True)
+        st.image("assets/logo.png", use_column_width=True)
 
 
         mode = st.radio("Mode", ["SKUs", "Page Crawler"])
@@ -200,7 +164,7 @@ def main():
             st.success("Cache cleared!")
 
     if mode == "SKUs":
-        origin = st.text_input("Base URL (Origin)", "https://legear.com.au").strip()
+        origin = st.text_input("Base URL (Origin)", "https://legear.com.au")
         # url_pattern removed as per request
         url_pattern = "" 
 
@@ -292,7 +256,7 @@ def main():
                     df[col] = None
 
             # Drop unwanted columns if they exist
-            unwanted = ["all_skus"]
+            unwanted = ["error", "all_skus"]
             df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
 
             # Reorder columns if possible
