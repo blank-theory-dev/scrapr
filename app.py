@@ -1,16 +1,25 @@
+"""B_T SKU Scrapr — Streamlit UI."""
+from __future__ import annotations
+
 import asyncio
+import os
+import time
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 import nest_asyncio
 
-# Fix for Streamlit's asyncio loop
 nest_asyncio.apply()
 
 from scraper.pipeline import scrape_items, scrape_by_page
 from scraper.config import SITE_CONFIGS
+
+# Set SCRAPR_ENABLE_CRAWLER=1 in your env to expose the Page Crawler tab.
+# Production should leave this unset — the team uses SKU mode only.
+CRAWLER_ENABLED = os.getenv("SCRAPR_ENABLE_CRAWLER", "0").lower() in ("1", "true", "yes")
+
 
 def _run(coro):
     try:
@@ -20,174 +29,167 @@ def _run(coro):
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
 
+
 def _normalise_rows(rows: List[Dict[str, Optional[str]]]) -> List[Dict[str, Optional[str]]]:
-    seen = set()
-    out = []
+    seen: set = set()
+    out: list = []
     for r in rows:
-        # Case-insensitive key lookup
         sku = (r.get("SKU") or r.get("sku") or "").strip() or None
         url = (r.get("URL") or r.get("url") or "").strip() or None
-        
         if not sku and not url:
             continue
-            
-        key = (sku or "").lower(), (url or "").lower()
+        key = ((sku or "").lower(), (url or "").lower())
         if key in seen:
             continue
         seen.add(key)
         out.append({"sku": sku, "url": url})
     return out
 
+
+def _render_results(results: list, download_filename: str = "results.csv") -> None:
+    """Render the results dataframe + download button."""
+    df = pd.DataFrame(results)
+
+    for i in range(2, 6):
+        col = f"image_url_{i}"
+        if col not in df.columns:
+            df[col] = None
+
+    df = df.drop(columns=[c for c in ["all_skus"] if c in df.columns], errors="ignore")
+
+    preferred = [
+        "sku", "error", "product_url", "name", "price", "sale_price", "rrp",
+        "discount_percent", "category", "breadcrumbs", "image_url",
+        "image_url_2", "image_url_3", "image_url_4", "image_url_5", "url",
+    ]
+    cols = [c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]
+    df = df[cols]
+
+    st.write("### Export Options")
+    selected_cols = st.multiselect(
+        "Choose columns to export:",
+        options=list(df.columns),
+        default=list(df.columns),
+        key=f"col_select_{download_filename}",
+    )
+
+    if selected_cols:
+        all_cols = list(df.columns)
+        sorted_cols = sorted(selected_cols, key=all_cols.index)
+        df_display = df[sorted_cols]
+        st.dataframe(df_display, use_container_width=True)
+        st.download_button(
+            "Download CSV",
+            df_display.to_csv(index=False).encode("utf-8"),
+            download_filename,
+            "text/csv",
+        )
+    else:
+        st.warning("Please select at least one column to export.")
+
+
 def main():
     st.set_page_config(page_title="B_T SKU Scrapr", layout="wide")
 
-    # Custom CSS for "Premium" look
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-
-    html, body, [class*="css"]  {
-        font-family: 'Inter', sans-serif;
-    }
-
-    /* Titles */
-    h1, h2, h3 {
-        color: var(--text-color);
-    }
-    h1 {
-        font-weight: 700;
-        letter-spacing: -0.02em;
-        margin-bottom: 0.5rem;
-    }
-    h2, h3 {
-        font-weight: 600;
-        opacity: 0.9;
-    }
-
-    /* Buttons */
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    h1 { font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+    h2, h3 { font-weight: 600; opacity: 0.9; }
     .stButton>button {
         background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 0.6rem 1.2rem;
-        font-weight: 600;
-        box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2), 0 2px 4px -1px rgba(79, 70, 229, 0.1);
-        transition: all 0.2s ease;
+        color: white; border-radius: 8px; border: none;
+        padding: 0.6rem 1.2rem; font-weight: 600;
+        box-shadow: 0 4px 6px -1px rgba(79,70,229,.2), 0 2px 4px -1px rgba(79,70,229,.1);
+        transition: all .2s ease;
     }
     .stButton>button:hover {
         background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
-        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3), 0 4px 6px -2px rgba(79, 70, 229, 0.15);
+        box-shadow: 0 10px 15px -3px rgba(79,70,229,.3), 0 4px 6px -2px rgba(79,70,229,.15);
         transform: translateY(-1px);
     }
-    .stButton>button:active {
-        transform: translateY(0);
-    }
-
-    /* Inputs - Use Secondary Background for contrast if available, else standard */
+    .stButton>button:active { transform: translateY(0); }
     .stTextInput>div>div>input, .stTextArea>div>div>textarea {
         background-color: var(--secondary-background-color);
         color: var(--text-color);
-        border: 1px solid rgba(128, 128, 128, 0.2);
-        border-radius: 8px;
+        border: 1px solid rgba(128,128,128,.2); border-radius: 8px;
     }
     .stTextInput>div>div>input:focus, .stTextArea>div>div>textarea:focus {
-        border-color: #6366f1;
-        box-shadow: 0 0 0 1px #6366f1;
+        border-color: #6366f1; box-shadow: 0 0 0 1px #6366f1;
     }
-
-    /* Sidebar - Streamlit handles background, we just refine borders */
-    [data-testid="stSidebar"] {
-        border-right: 1px solid rgba(128, 128, 128, 0.1);
-    }
-    
-    /* Layout containers */
-    .block-container {
-        padding-top: 2rem;
-        max-width: 1200px;
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2rem;
-    }
+    [data-testid="stSidebar"] { border-right: 1px solid rgba(128,128,128,.1); }
+    .block-container { padding-top: 2rem; max-width: 1200px; }
+    .stTabs [data-baseweb="tab-list"] { gap: 2rem; }
     .stTabs [data-baseweb="tab"] {
-        height: auto;
-        white-space: pre-wrap;
-        background-color: transparent;
-        border-radius: 4px;
-        gap: 0;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        color: var(--text-color);
-        opacity: 0.7;
+        height: auto; white-space: pre-wrap; background-color: transparent;
+        border-radius: 4px; padding: 10px; color: var(--text-color); opacity: .7;
     }
-    .stTabs [aria-selected="true"] {
-        color: #6366f1;
-        opacity: 1;
-        border-bottom-color: #6366f1;
-    }
-
+    .stTabs [aria-selected="true"] { color: #6366f1; opacity: 1; border-bottom-color: #6366f1; }
     </style>
     """, unsafe_allow_html=True)
 
     st.title("B_T SKU Scrapr")
-    st.markdown("`v1.1.0`")
+    st.markdown("`v1.2.0`")
     st.markdown("### Extract product data from Neto, Shopify, and WooCommerce")
 
-    # Sidebar for configuration
+    # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.image("assets/logo.png", use_column_width=True)
+        logo = Path("assets/logo.png")
+        if logo.exists():
+            st.image(str(logo), use_container_width=True)
 
+        if CRAWLER_ENABLED:
+            mode = st.radio("Mode", ["SKUs", "Page Crawler"])
+        else:
+            mode = "SKUs"
+            st.info("Running in SKU mode.")
 
-        mode = st.radio("Mode", ["SKUs", "Page Crawler"])
-        
         cms_choice = st.selectbox(
             "CMS / Site Type",
             ["Neto", "Shopify", "WordPress (WooCommerce)"],
-            index=0  # Default to Neto
+            index=0,
         )
-        
-        # Hardcoded defaults to ensure server stability
+
         concurrency = 2
         delay_ms = 400
-        
+
         fast_mode = False
         if cms_choice == "Shopify":
             st.markdown("---")
-            fast_mode = st.checkbox("Fast Mode (Catalog Only)", 
-                                  help="Skip page visits to avoid 429 errors. No breadcrumbs, but instant results.")
-        
+            fast_mode = st.checkbox(
+                "Fast Mode (Catalog Only)",
+                help="Skip page visits to avoid 429 errors. No breadcrumbs, but instant results.",
+            )
+
         st.markdown("---")
         if st.button("Clear Cache", help="Force re-download of catalog data"):
             st.cache_resource.clear()
             st.success("Cache cleared!")
 
+    # ── SKUs mode ─────────────────────────────────────────────────────────────
     if mode == "SKUs":
         origin = st.text_input("Base URL (Origin)", "https://legear.com.au").strip()
-        # url_pattern removed as per request
-        url_pattern = "" 
+        url_pattern = ""
 
-
-        # Input Tabs
         tab1, tab2 = st.tabs(["Manual Input", "CSV Upload"])
-        
         sku_input = ""
-        url_input = ""
         csv_file = None
 
         with tab1:
-            # Removed Enter URLs section, so just show SKU input
-            sku_input = st.text_area("Enter SKUs (one per line)", height=150, placeholder="ABC-123\nXYZ-789")
-        
+            sku_input = st.text_area(
+                "Enter SKUs (one per line)", height=150,
+                placeholder="ABC-123\nXYZ-789",
+            )
+
         with tab2:
-            csv_file = st.file_uploader("Upload CSV (must have 'sku' or 'url' column)", type=["csv"])
+            csv_file = st.file_uploader(
+                "Upload CSV (must have 'sku' or 'url' column)", type=["csv"]
+            )
 
         if st.button("Scrape Items", use_container_width=True):
-            # Gather inputs
-            raw_rows = []
-            
-            # 1. CSV
+            raw_rows: list = []
+
             if csv_file:
                 try:
                     df_in = pd.read_csv(csv_file, dtype=str, keep_default_na=False)
@@ -196,13 +198,10 @@ def main():
                     st.error(f"Failed reading CSV: {e}")
                     return
 
-            # 2. Manual SKUs
             if sku_input.strip():
-                raw_rows.extend([{"sku": s.strip()} for s in sku_input.splitlines() if s.strip()])
-
-            # 3. Manual URLs (Removed from UI)
-            # if url_input.strip():
-            #    raw_rows.extend([{"url": u.strip()} for u in url_input.splitlines() if u.strip()])
+                raw_rows.extend(
+                    [{"sku": s.strip()} for s in sku_input.splitlines() if s.strip()]
+                )
 
             items = _normalise_rows(raw_rows)
 
@@ -210,99 +209,109 @@ def main():
                 st.warning("Please provide at least one SKU or URL.")
                 return
 
-            # 4. Prepare Indexer (Cached)
             indexer = None
             if cms_choice == "Shopify" and origin:
                 from scraper.shopify_catalog import ShopifyCatalogIndexer
-                
-                @st.cache_resource(ttl=3600, show_spinner="Indexing Shopify Catalog...")
+
+                @st.cache_resource(ttl=3600, show_spinner="Indexing Shopify Catalog…")
                 def get_cached_indexer(url: str):
                     idx = ShopifyCatalogIndexer(url)
-                    # We need to run async fetch in a sync wrapper for st.cache_resource?
-                    # Or we can cache the object and run fetch if not indexed?
-                    # Better: Run the fetch here using _run
                     _run(idx.fetch_catalog())
                     return idx
-                
+
                 try:
                     indexer = get_cached_indexer(origin)
                     if not indexer.catalog:
                         st.warning("Catalog download blocked (429). Switching to slow search mode.")
-                        indexer = None # Force fallback to legacy search
+                        indexer = None
                     else:
                         st.success(f"Using cached catalog ({len(indexer.catalog)} variants)")
                 except Exception as e:
                     st.error(f"Failed to index catalog: {e}")
                     indexer = None
 
-            with st.spinner(f"Scraping {len(items)} items..."):
-                results = _run(scrape_items(
-                    items, cms_choice, origin, url_pattern, concurrency, delay_ms, indexer=indexer, fast_mode=fast_mode
-                ))
-            
-                st.session_state['sku_results'] = results
-            
-            errors_count = sum(1 for r in results if r.get('error'))
-            if errors_count > 0:
-                st.warning(f"Completed with errors! {errors_count} items failed to scrape. Check the 'error' column in the table below for details.")
-            else:
-                st.success(f"Completed! Processed {len(results)} items.")
-            
-        # Display results from session state if available
-        if 'sku_results' in st.session_state and st.session_state['sku_results']:
-            results = st.session_state['sku_results']
-            df = pd.DataFrame(results)
-            
-            # Ensure secondary image columns exist
-            for i in range(2, 6):
-                col = f"image_url_{i}"
-                if col not in df.columns:
-                    df[col] = None
+            # ── Live progress tracking ────────────────────────────────────────
+            total_items = len(items)
+            progress_bar = st.progress(0.0, text=f"Starting {total_items} items…")
+            status_line = st.empty()
+            error_tally = [0]
+            start_ts = [time.monotonic()]
 
-            # Drop unwanted columns if they exist
-            unwanted = ["all_skus"]
-            df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
-
-            # Reorder columns if possible
-            preferred = ["sku", "error", "product_url", "name", "price", "sale_price", "rrp", "discount_percent", 
-                       "category", "breadcrumbs", "image_url", 
-                       "image_url_2", "image_url_3", "image_url_4", "image_url_5",
-                       "url"]
-            cols = [c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]
-            df = df[cols]
-
-            # Column selection
-            st.write("### Export Options")
-            selected_cols = st.multiselect(
-                "Choose columns to export:",
-                options=list(df.columns),
-                default=list(df.columns),
-                key="sku_col_select"
-            )
-
-            if selected_cols:
-                # Enforce original column order
-                all_cols = list(df.columns)
-                sorted_cols = sorted(selected_cols, key=all_cols.index)
-                
-                df_display = df[sorted_cols]
-                st.dataframe(df_display, use_container_width=True)
-                
-                # CSV Download
-                csv = df_display.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "Download CSV",
-                    csv,
-                    "results.csv",
-                    "text/csv",
-                    key='download-csv'
+            def on_progress(completed: int, total: int, sku: str, state: str) -> None:
+                pct = completed / total if total > 0 else 1.0
+                elapsed = time.monotonic() - start_ts[0]
+                per_item = elapsed / completed if completed > 0 else 0
+                eta_s = int(per_item * (total - completed))
+                eta_str = (
+                    f"~{eta_s}s remaining"
+                    if completed < total and eta_s > 0
+                    else "finishing…"
                 )
-            else:
-                st.warning("Please select at least one column to export.")
-        elif 'sku_results' in st.session_state and not st.session_state['sku_results']:
-             st.info("No results found.")
+                if state == "failed":
+                    error_tally[0] += 1
+                icon = "✅" if state == "completed" else "❌"
+                progress_bar.progress(
+                    pct,
+                    text=f"{icon} {completed}/{total} — {eta_str}"
+                    + (f"  ({error_tally[0]} errors)" if error_tally[0] > 0 else ""),
+                )
+                if state == "failed":
+                    status_line.warning(f"❌ **{sku}** — failed (see error column)")
+                else:
+                    status_line.markdown(f"✅ **{sku}** — OK")
 
-    else:
+            with st.spinner(""):
+                results = _run(
+                    scrape_items(
+                        items,
+                        cms_choice,
+                        origin,
+                        url_pattern,
+                        concurrency,
+                        delay_ms,
+                        indexer=indexer,
+                        fast_mode=fast_mode,
+                        on_progress=on_progress,
+                    )
+                )
+
+            progress_bar.empty()
+            status_line.empty()
+
+            st.session_state["sku_results"] = results
+
+            errors_count = sum(1 for r in results if r.get("error"))
+            elapsed_total = time.monotonic() - start_ts[0]
+            elapsed_str = f"{elapsed_total:.1f}s"
+
+            if errors_count > 0:
+                st.warning(
+                    f"Completed in {elapsed_str} — ⚠️ {errors_count}/{len(results)} items failed. "
+                    f"Check the **error** column below for details."
+                )
+                # Surface a summary of error types to help diagnose
+                error_types: dict = {}
+                for r in results:
+                    err = r.get("error") or ""
+                    key = err.split(":")[0].strip() if err else "unknown"
+                    error_types[key] = error_types.get(key, 0) + 1
+                with st.expander("Error breakdown"):
+                    for etype, count in sorted(error_types.items(), key=lambda x: -x[1]):
+                        st.markdown(f"- **{etype}**: {count} item(s)")
+            else:
+                st.success(f"Completed in {elapsed_str} — {len(results)} items scraped successfully.")
+
+        if "sku_results" in st.session_state and st.session_state["sku_results"]:
+            _render_results(st.session_state["sku_results"], "results.csv")
+        elif "sku_results" in st.session_state and not st.session_state["sku_results"]:
+            st.info("No results found.")
+
+    # ── Page Crawler mode (hidden by default) ─────────────────────────────────
+    elif mode == "Page Crawler":
+        st.info(
+            "Page Crawler mode is an advanced feature. "
+            "For routine scraping, use **SKUs** mode instead."
+        )
         col1, col2 = st.columns(2)
         with col1:
             page_url = st.text_input("Category Page URL")
@@ -314,56 +323,17 @@ def main():
                 st.warning("Please enter a URL.")
                 return
 
-            with st.spinner("Crawling page..."):
-                results = _run(scrape_by_page(
-                    page_url, cms_choice, max_items, concurrency, delay_ms
-                ))
-
-                st.session_state['crawl_results'] = results
-
-            st.success(f"Crawled {len(results)} items.")
-            
-        if 'crawl_results' in st.session_state and st.session_state['crawl_results']:
-            results = st.session_state['crawl_results']
-            df = pd.DataFrame(results)
-            
-            # Ensure secondary image columns exist
-            for i in range(2, 6):
-                col = f"image_url_{i}"
-                if col not in df.columns:
-                    df[col] = None
-
-            # Drop unwanted columns if they exist
-            unwanted = ["error", "all_skus"]
-            df = df.drop(columns=[c for c in unwanted if c in df.columns], errors='ignore')
-
-            # Column selection
-            st.write("### Export Options")
-            selected_cols = st.multiselect(
-                "Choose columns to export:",
-                options=list(df.columns),
-                default=list(df.columns),
-                key="crawler_col_select"
-            )
-
-            if selected_cols:
-                # Enforce original column order
-                all_cols = list(df.columns)
-                sorted_cols = sorted(selected_cols, key=all_cols.index)
-                
-                df_display = df[sorted_cols]
-                st.dataframe(df_display, use_container_width=True)
-                
-                csv = df_display.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "Download CSV",
-                    csv,
-                    "crawl_results.csv",
-                    "text/csv"
+            with st.spinner("Crawling page…"):
+                results = _run(
+                    scrape_by_page(page_url, cms_choice, max_items, concurrency, delay_ms)
                 )
-            else:
-                st.warning("Please select at least one column to export.")
+                st.session_state["crawl_results"] = results
 
+            errors = sum(1 for r in results if r.get("error"))
+            st.success(f"Crawled {len(results)} items." + (f" ({errors} errors)" if errors else ""))
+
+        if "crawl_results" in st.session_state and st.session_state["crawl_results"]:
+            _render_results(st.session_state["crawl_results"], "crawl_results.csv")
 
 
 if __name__ == "__main__":

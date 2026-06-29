@@ -5,3 +5,5 @@ lxml
 pandas
 nest_asyncio
 curl-cffi
+pytest>=8.0
+pytest-asyncio>=0.23

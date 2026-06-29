@@ -387,8 +387,14 @@ def _extract_sku(soup: BeautifulSoup, url: str | None, config: Optional[SiteConf
             if el:
                 txt = el.get_text(strip=True) if hasattr(el, "get_text") else el.get("content")
                 if txt:
-                    # Clean up "SKU: 123" -> "123"
-                    m = re.search(r"(?:SKU\s*[:#-]?\s*)?([A-Za-z0-9._-]{3,})", txt, re.I)
+                    # Strict: "SKU [optional-word] SEPARATOR value" e.g. "SKU code: METAV7212"
+                    m = re.search(
+                        r"(?:SKU|Part|Model|Code|Item)\s*(?:\w+\s*)?[:#=\-]\s*([A-Za-z0-9][A-Za-z0-9._-]*)",
+                        txt, re.I,
+                    )
+                    if not m:
+                        # Loose fallback for plain "SKU: value" or bare "value"
+                        m = re.search(r"(?:SKU\s*[:#-]?\s*)?([A-Za-z0-9._-]{3,})", txt, re.I)
                     if m: return m.group(1).strip()
                     return txt.strip()
         
@@ -410,7 +416,12 @@ def _extract_sku(soup: BeautifulSoup, url: str | None, config: Optional[SiteConf
         if el:
             t = el.get_text(" ", strip=True)
             if t:
-                m = re.search(r"SKU\s*[:#-]?\s*([A-Za-z0-9._-]{3,})", t, re.I)
+                m = re.search(
+                    r"(?:SKU|Part|Model|Code|Item)\s*(?:\w+\s*)?[:#=\-]\s*([A-Za-z0-9][A-Za-z0-9._-]*)",
+                    t, re.I,
+                )
+                if not m:
+                    m = re.search(r"SKU\s*[:#-]?\s*([A-Za-z0-9._-]{3,})", t, re.I)
                 if m: return m.group(1).strip()
     
     # URL

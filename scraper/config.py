@@ -1,14 +1,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Pattern, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Pattern
 import re
+
 
 @dataclass
 class SiteConfig:
     base_domain: str
     url_pattern: Optional[str] = None
+    # Ordered fallback URL path patterns for SKU-based URL construction.
+    # Each entry is an absolute path template like "/p/{sku}" or "/buy/{sku}".
+    # The pipeline tries them in order, stopping on the first HTTP 200.
+    url_patterns: List[str] = field(default_factory=list)
     price_selector: Optional[str] = None
     sale_price_selector: Optional[str] = None
     rrp_selector: Optional[str] = None
@@ -24,9 +29,12 @@ class SiteConfig:
     price_regex: Pattern = re.compile(r"[\d\.,]+")
     rrp_regex: Pattern = re.compile(r"[\d\.,]+")
 
+
 SITE_CONFIGS: Dict[str, SiteConfig] = {
     "neto_default": SiteConfig(
         base_domain="neto.generic",
+        # Primary URL pattern + fallback alternative used by some Neto store themes.
+        url_patterns=["/p/{sku}", "/buy/{sku}"],
         sku_selector="[itemprop='sku'], [itemprop='productID'], .sku, .product-sku, span[itemprop='sku']",
         sku_js_pattern=r"k4n\s*=\s*\{.*?sku\s*:\s*[\"']([^\"']+)[\"']",
         price_js_pattern=r"k4n\s*=\s*\{.*?price\s*:\s*[\"']([\d\.,]+)[\"']",
@@ -71,7 +79,6 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
     ),
     "shopify_default": SiteConfig(
         base_domain="shopify.generic",
-        # Price: meta tags, common classes, JSON-LD fallback handled in parser
         price_selector=(
             "meta[property='og:price:amount'], meta[property='product:price:amount'], "
             ".price-item--sale, .price-item--regular, .product__price, .price .amount, "
@@ -80,12 +87,10 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
         sale_price_selector=(
             ".price-item--sale, .product__price--sale, .sale-price, .special-price, .price--on-sale .price-item--sale"
         ),
-        # RRP: compare-at prices, strikethrough elements
         rrp_selector=(
             ".price__compare, .price--compare, .compare-at, .product-single__price--compare-at, "
             "s.price-item--regular, .old-price, .was_price"
         ),
-        # Image: OpenGraph, specific Shopify CDN patterns, common gallery classes
         image_selector=(
             "meta[property='og:image'], meta[name='twitter:image'], "
             "img[src*='/products/'][data-src], img[src*='/cdn/shop/products/'], "
@@ -94,17 +99,14 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
             ".c-product-main__media img, .swiper-slide img, "
             ".c-product-main__info-thumbnails__thumbnail img, .u-object-image"
         ),
-        # Discount: sale badges, saved amount text
         discount_selector=(
             ".badge--sale, .price__badge-sale, .product-label--sale, "
             ".sale-label, .product-tag--sale"
         ),
-        # Name: H1, meta tags
         name_selector=(
             "h1.product__title, h1.product-single__title, h1.title, "
             "meta[property='og:title'], meta[name='twitter:title']"
         ),
-        # Category: Breadcrumbs usually best source
         category_selector=("nav.breadcrumb a, .breadcrumb a, .breadcrumbs a"),
         breadcrumbs_selector=("nav.breadcrumb a, .breadcrumb a, .breadcrumbs a"),
     ),
