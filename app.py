@@ -187,7 +187,9 @@ def main():
             st.cache_resource.clear()
             st.success("Cache cleared!")
 
-    origin = st.text_input("Base URL (Origin)", "https://legear.com.au").strip()
+    # Default must match the CMS dropdown's default (Neto). legear.com.au is
+    # Shopify, so pairing it with Neto built /p/{sku} URLs that 404 on every row.
+    origin = st.text_input("Base URL (Origin)", "https://www.metavparts.com.au").strip()
     url_pattern = ""
 
     tab1, tab2 = st.tabs(["Manual Input", "CSV Upload"])
