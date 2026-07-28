@@ -6,8 +6,10 @@ __pycache__/
 # Per-run checkpoints — scraped data, not source
 .scrapr_runs/
 
-# Scraped output and client input lists. This repo is PUBLIC, so supplier pricing
-# and part lists must not be committed. Keep them local.
+# Scraped output, catalogue dumps and client input lists. This repo is PUBLIC, so
+# supplier pricing and part lists must not be committed. Keep them local.
 results.csv
 *_export.csv
 Machter*.csv
+all_skus.txt
+products_sample.json
