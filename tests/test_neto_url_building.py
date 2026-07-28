@@ -1,7 +1,6 @@
 """Tests for Neto URL construction — pipeline._build_url_for_sku."""
 from __future__ import annotations
 
-import pytest
 from scraper.pipeline import _build_url_for_sku
 
 

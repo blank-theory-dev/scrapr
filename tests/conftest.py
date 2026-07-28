@@ -26,12 +26,6 @@ def neto_404_html() -> str:
 
 
 @pytest.fixture
-def neto_blocked_html() -> str:
-    """A Cloudflare challenge page returned instead of the product page."""
-    return (FIXTURES_DIR / "neto_cloudflare_blocked.html").read_text()
-
-
-@pytest.fixture
 def neto_cfg():
     """The neto_default SiteConfig entry."""
     from scraper.config import SITE_CONFIGS

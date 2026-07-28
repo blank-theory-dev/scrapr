@@ -8,11 +8,8 @@ import re
 
 @dataclass
 class SiteConfig:
-    base_domain: str
-    url_pattern: Optional[str] = None
-    # Ordered fallback URL path patterns for SKU-based URL construction.
-    # Each entry is an absolute path template like "/p/{sku}" or "/buy/{sku}".
-    # The pipeline tries them in order, stopping on the first HTTP 200.
+    # Ordered fallback URL path templates for SKU-based URL construction, e.g.
+    # "/p/{sku}". The pipeline tries them in order, stopping on the first HTTP 200.
     url_patterns: List[str] = field(default_factory=list)
     price_selector: Optional[str] = None
     sale_price_selector: Optional[str] = None
@@ -20,19 +17,17 @@ class SiteConfig:
     image_selector: Optional[str] = None
     discount_selector: Optional[str] = None
     name_selector: Optional[str] = None
-    category_selector: Optional[str] = None
+    # Category is taken from the breadcrumb trail, so there is no separate selector.
     breadcrumbs_selector: Optional[str] = None
     sku_selector: Optional[str] = None
     sku_js_pattern: Optional[str] = None
     price_js_pattern: Optional[str] = None
     sale_price_js_pattern: Optional[str] = None
     price_regex: Pattern = re.compile(r"[\d\.,]+")
-    rrp_regex: Pattern = re.compile(r"[\d\.,]+")
 
 
 SITE_CONFIGS: Dict[str, SiteConfig] = {
     "neto_default": SiteConfig(
-        base_domain="neto.generic",
         # /buy/{sku} was a guess at an alternate Neto theme route; it 404s on every
         # store tested, so it only bought a wasted request per dead SKU.
         url_patterns=["/p/{sku}"],
@@ -67,11 +62,6 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
             "h1[itemprop='name'], .product-title, .product_title, "
             "meta[property='og:title'], meta[name='twitter:title']"
         ),
-        category_selector=(
-            "[itemprop='itemListElement'] [itemprop='item'], "
-            "nav.breadcrumb a, .breadcrumb a, .woocommerce-breadcrumb a, "
-            "ol.breadcrumb li a, ul.breadcrumb li a, nav[aria-label='breadcrumb'] a"
-        ),
         breadcrumbs_selector=(
             "[itemprop='itemListElement'] [itemprop='item'], "
             "nav.breadcrumb a, .breadcrumb a, .woocommerce-breadcrumb a, "
@@ -79,7 +69,6 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
         ),
     ),
     "shopify_default": SiteConfig(
-        base_domain="shopify.generic",
         price_selector=(
             "meta[property='og:price:amount'], meta[property='product:price:amount'], "
             ".price-item--sale, .price-item--regular, .product__price, .price .amount, "
@@ -108,18 +97,15 @@ SITE_CONFIGS: Dict[str, SiteConfig] = {
             "h1.product__title, h1.product-single__title, h1.title, "
             "meta[property='og:title'], meta[name='twitter:title']"
         ),
-        category_selector=("nav.breadcrumb a, .breadcrumb a, .breadcrumbs a"),
         breadcrumbs_selector=("nav.breadcrumb a, .breadcrumb a, .breadcrumbs a"),
     ),
     "wordpress_default": SiteConfig(
-        base_domain="woo.generic",
         price_selector=(".summary .price, .woocommerce-Price-amount"),
         sale_price_selector=(".price ins .amount, .price .woocommerce-Price-currencySymbol + ins .amount, .sale-price"),
         rrp_selector=(".price del .amount, .price .woocommerce-Price-currencySymbol + del .amount"),
         image_selector=("meta[property='og:image'], img.wp-post-image, .woocommerce-product-gallery__image img"),
         discount_selector=(".onsale, .badge--sale"),
         name_selector=("h1.product_title, [itemprop='name'], meta[property='og:title']"),
-        category_selector=(".woocommerce-breadcrumb a, nav.breadcrumb a, .breadcrumb a"),
         breadcrumbs_selector=(".woocommerce-breadcrumb a, nav.breadcrumb a, .breadcrumb a"),
     ),
 }

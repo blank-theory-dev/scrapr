@@ -14,7 +14,6 @@ import nest_asyncio
 nest_asyncio.apply()
 
 from scraper.pipeline import scrape_items
-from scraper.config import SITE_CONFIGS
 
 
 def _run(coro):

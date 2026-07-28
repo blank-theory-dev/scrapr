@@ -1,7 +1,7 @@
 from __future__ import annotations
 from bs4 import BeautifulSoup
 from typing import Optional, List
-from urllib.parse import urlparse, urljoin, unquote
+from urllib.parse import urlparse, unquote
 import json, re
 from .config import SiteConfig
 from . import structured
@@ -166,58 +166,6 @@ def _extract_sale_price(soup: BeautifulSoup, config: SiteConfig) -> Optional[flo
                 if p: return p
     return None
 
-
-def _extract_image(soup: BeautifulSoup, config: SiteConfig, base_url: str) -> Optional[str]:
-    base_domain = _origin_from_url(base_url).replace("https://", "").replace("http://", "")
-    
-    # 1. Try JS "var item"
-    for s in soup.find_all("script"):
-        if s.string and "var item" in s.string:
-            m = re.search(r'ImageURL\s*:\s*"([^"]+)"', s.string)
-            if m:
-                img = m.group(1).strip()
-                norm = _normalise_img_url(img, base_domain)
-                if norm and not _is_share_image(norm):
-                    return norm
-
-    # 2. Config selector
-    if config.image_selector:
-        for sel in config.image_selector.split(","):
-            el = soup.select_one(sel.strip())
-            if el:
-                img = el.get("content") or el.get("src") or el.get("href") or el.get("data-src")
-                if img:
-                    norm = _normalise_img_url(img, base_domain)
-                    if norm and not _is_share_image(norm):
-                        return norm
-    
-    # 3. JSON-LD
-    for s in soup.find_all("script", type="application/ld+json"):
-        try:
-            data = json.loads(s.string or "")
-        except Exception:
-            continue
-        items = data if isinstance(data, list) else [data]
-        for d in items:
-            if isinstance(d, dict) and d.get("@type") in ("Product", "Offer"):
-                img = d.get("image")
-                if isinstance(img, list) and img:
-                    norm = _normalise_img_url(str(img[0]), base_domain)
-                    if norm and not _is_share_image(norm):
-                        return norm
-                if isinstance(img, str):
-                    norm = _normalise_img_url(img, base_domain)
-                    if norm and not _is_share_image(norm):
-                        return norm
-    
-    # 4. Fallback (og:image)
-    meta = soup.select_one("meta[property='og:image']")
-    if meta:
-        norm = _normalise_img_url(meta.get("content"), base_domain)
-        if norm and not _is_share_image(norm):
-            return norm
-        
-    return None
 
 def _extract_all_images(soup: BeautifulSoup, config: SiteConfig, base_url: str) -> List[str]:
     """

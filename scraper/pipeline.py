@@ -192,10 +192,9 @@ def _build_url_for_sku(
     if not sku:
         return None
     if cms_choice == "Shopify" and not url_pattern:
-        if origin:
-            return f"{origin}/search?type=product&q={sku}"
-        return None
-    if cms_choice in ("Shopify", "WordPress (WooCommerce)") and not url_pattern:
+        # Shopify SKUs aren't in the URL, so fall back to the storefront search.
+        return f"{origin}/search?type=product&q={sku}" if origin else None
+    if cms_choice == "WordPress (WooCommerce)" and not url_pattern:
         return None
     if url_pattern and "{sku}" in url_pattern:
         return url_pattern.format(sku=sku)
