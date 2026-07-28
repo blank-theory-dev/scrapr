@@ -69,12 +69,21 @@ def _domain_of(origin: str) -> str:
         return origin
 
 
-def _make_error_row(sku: Optional[str], url_in: Optional[str], error_msg: str) -> dict:
-    """Build a result row that records a failure with all fields set to None."""
+def _make_error_row(
+    sku: Optional[str],
+    url_in: Optional[str],
+    error_msg: str,
+    attempted: Optional[str] = None,
+) -> dict:
+    """Build a result row that records a failure with all fields set to None.
+
+    ``attempted`` is the URL actually requested. Without it a 404 row is
+    undiagnosable — you cannot tell a missing product from a malformed URL.
+    """
     return {
         "sku": sku,
         "url": url_in,
-        "product_url": None,
+        "product_url": attempted,
         "group_id": None,
         "variant_id": None,
         "all_variant_ids": [],
@@ -138,6 +147,19 @@ class _Checkpoint:
             pass
 
 
+class UnresolvableHost(Exception):
+    """The base URL's hostname does not resolve — almost always a typo."""
+
+
+def _is_unresolvable_host(exc: Exception) -> bool:
+    return "could not resolve host" in str(exc).lower()
+
+
+def _bad_origin_msg(origin: Optional[str]) -> str:
+    return (f"bad_origin: '{origin}' does not resolve — check the Base URL for a typo "
+            "(e.g. '.co.au' instead of '.com.au')")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Fetch
 # ──────────────────────────────────────────────────────────────────────────────
@@ -160,6 +182,11 @@ async def _fetch(client: requests.AsyncSession, url: str, delay_ms: int, retries
             return r.status_code, r.text, str(r.url)
         except Exception as e:
             last_err = e
+            # A hostname that does not resolve will not start resolving on retry.
+            # Usually a typo in the base URL, so surface it now rather than
+            # spending 5 lookups on every SKU in the list.
+            if _is_unresolvable_host(e):
+                raise UnresolvableHost(str(e)) from e
             if attempt < retries - 1:
                 await asyncio.sleep((attempt + 1) * 2)
                 continue
@@ -191,6 +218,9 @@ def _build_url_for_sku(
         return url
     if not sku:
         return None
+    # A pasted base URL often ends in "/", which produced "example.com//p/SKU".
+    # Servers tolerate it; humans reading the CSV shouldn't have to.
+    origin = origin.rstrip("/") if origin else origin
     if cms_choice == "Shopify" and not url_pattern:
         # Shopify SKUs aren't in the URL, so fall back to the storefront search.
         return f"{origin}/search?type=product&q={sku}" if origin else None
@@ -257,6 +287,9 @@ async def scrape_items(
     # requests are skipped with a "circuit_open" error rather than hammering it.
     _domain_failures: Dict[str, int] = {}
     _CIRCUIT_THRESHOLD = 5
+
+    # Set once the base URL is shown not to resolve; every later item short-circuits.
+    _bad_origin: List[Optional[str]] = [None]
 
     if cms_choice == "Shopify" and origin and not indexer:
         try:
@@ -417,6 +450,11 @@ async def scrape_items(
 
                         # ── Neto / WooCommerce / direct-URL path ──────────
                         else:
+                            if _bad_origin[0] is not None:
+                                _append(_make_error_row(
+                                    sku, url_in, _bad_origin_msg(_bad_origin[0]), url))
+                                return
+
                             # Circuit-breaker: skip if origin is confirmed blocked
                             if origin:
                                 domain = _domain_of(origin)
@@ -426,6 +464,7 @@ async def scrape_items(
                                         f"circuit_open: {domain} refused {_CIRCUIT_THRESHOLD} requests in a row "
                                         "(bot protection). This is a network problem, not a data problem — "
                                         "re-run from a residential connection rather than a cloud host.",
+                                        url,
                                     ))
                                     return
 
@@ -457,7 +496,7 @@ async def scrape_items(
                                         _domain_failures[domain] = _domain_failures.get(domain, 0) + 1
                                     else:
                                         _domain_failures[domain] = 0
-                                _append(_make_error_row(sku, url_in, _classify_error(status, html)))
+                                _append(_make_error_row(sku, url_in, _classify_error(status, html), final_url or url))
                                 return
 
                             # Successful fetch — reset circuit-breaker counter for this domain
@@ -497,12 +536,16 @@ async def scrape_items(
                                 _append(data)
 
                             except asyncio.TimeoutError:
-                                _append(_make_error_row(sku, url_in, "parse_timeout: parser timed out after 30s"))
+                                _append(_make_error_row(sku, url_in, "parse_timeout: parser timed out after 30s", url))
                             except Exception as e:
-                                _append(_make_error_row(sku, url_in, f"parse_error: {e}"))
+                                _append(_make_error_row(sku, url_in, f"parse_error: {e}", url))
 
+                    except UnresolvableHost:
+                        # One typo shouldn't cost a DNS lookup per SKU.
+                        _bad_origin[0] = origin
+                        _append(_make_error_row(sku, url_in, _bad_origin_msg(origin), url))
                     except Exception as e:
-                        _append(_make_error_row(sku, url_in, f"request_failed: {e}"))
+                        _append(_make_error_row(sku, url_in, f"request_failed: {e}", url))
 
             finally:
                 completed_count += 1

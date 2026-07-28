@@ -283,6 +283,59 @@ class TestCircuitBreaker:
             "circuit breaker should trip on repeated 403s"
 
 
+# ── Diagnosability of failures ────────────────────────────────────────────────
+
+class TestErrorRowsRecordTheUrl:
+    def test_404_row_shows_which_url_was_tried(self):
+        """A 404 with no URL is undiagnosable — missing product or malformed URL?"""
+        from scraper.pipeline import scrape_items
+
+        origin = "https://store.example.com"
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession:
+            MockSession.return_value = _make_mock_client({})  # everything 404s
+            results = run_async(
+                scrape_items([{"sku": "GONE-1"}], "Neto", origin, None,
+                             concurrency=1, delay_ms=0)
+            )
+
+        assert results[0]["product_url"] == f"{origin}/p/GONE-1"
+
+
+class TestUnresolvableOrigin:
+    def test_typo_in_base_url_fails_once_not_per_sku(self):
+        """A hostname that doesn't resolve won't start resolving on retry.
+
+        A typo'd base URL (.co.au for .com.au) used to cost 5 DNS lookups on
+        every SKU, because the circuit breaker only counts HTTP statuses.
+        """
+        from scraper.pipeline import scrape_items
+
+        calls = []
+
+        class _DnsFailSession:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): pass
+            async def get(self, url, **kw):
+                calls.append(url)
+                raise RuntimeError(
+                    "Failed to perform, curl: (6) Could not resolve host: www.typo.co.au."
+                )
+
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession:
+            MockSession.return_value = _DnsFailSession()
+            results = run_async(
+                scrape_items([{"sku": f"S{i}"} for i in range(10)],
+                             "Neto", "https://www.typo.co.au", None,
+                             concurrency=1, delay_ms=0)
+            )
+
+        assert len(results) == 10
+        assert all("bad_origin" in (r.get("error") or "") for r in results), \
+            [r.get("error") for r in results]
+        # Homepage warm-up + one product attempt; the other 9 short-circuit.
+        assert len(calls) <= 3, f"expected to stop probing DNS, got {len(calls)} calls"
+
+
 # ── Checkpointing ─────────────────────────────────────────────────────────────
 
 class TestCheckpoint:
