@@ -237,21 +237,105 @@ class TestNetoScrapeItemsErrors:
         assert events == ["failed"]
 
 
+# ── Circuit breaker ───────────────────────────────────────────────────────────
+
+class TestCircuitBreaker:
+    def test_dead_skus_do_not_open_the_circuit(self):
+        """A run of 404s is normal data, not an outage.
+
+        Auditing discontinued parts means long stretches of 404. Counting those
+        as blocks made the tool abandon the run exactly when it was doing its
+        job — 8 dead SKUs used to come back as 5 not_found + 3 circuit_open.
+        """
+        from scraper.pipeline import scrape_items
+
+        origin = "https://store.example.com"
+        skus = [{"sku": f"DEAD-{i:03d}"} for i in range(8)]
+
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession:
+            MockSession.return_value = _make_mock_client({})  # everything 404s
+
+            results = run_async(
+                scrape_items(skus, "Neto", origin, None, concurrency=1, delay_ms=0)
+            )
+
+        assert len(results) == 8
+        assert all("not_found" in (r.get("error") or "") for r in results), \
+            [r.get("error") for r in results]
+        assert not any("circuit_open" in (r.get("error") or "") for r in results)
+
+    def test_real_blocks_still_open_the_circuit(self):
+        """403s are a refusal, and should still stop us hammering the site."""
+        from scraper.pipeline import scrape_items
+
+        origin = "https://store.example.com"
+        skus = [{"sku": f"SKU-{i:03d}"} for i in range(8)]
+        blocked = (403, "<html>Just a moment... cloudflare</html>")
+
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession:
+            MockSession.return_value = _make_mock_client({"/p/": blocked})
+
+            results = run_async(
+                scrape_items(skus, "Neto", origin, None, concurrency=1, delay_ms=0)
+            )
+
+        assert any("circuit_open" in (r.get("error") or "") for r in results), \
+            "circuit breaker should trip on repeated 403s"
+
+
+# ── Checkpointing ─────────────────────────────────────────────────────────────
+
+class TestCheckpoint:
+    def test_rows_survive_on_disk_and_second_run_resumes(self, tmp_path):
+        """An interrupted run must keep finished rows; re-running skips them."""
+        from scraper.pipeline import scrape_items
+
+        origin = "https://store.example.com"
+        ckpt = tmp_path / "run.csv"
+        valid_html = _read_fixture("neto_product_valid.html")
+
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession:
+            MockSession.return_value = _make_mock_client(
+                {"/p/TEST-POLO-BL": (200, valid_html)}
+            )
+            run_async(scrape_items(
+                [{"sku": "TEST-POLO-BL"}], "Neto", origin, None,
+                concurrency=1, delay_ms=0, checkpoint_path=str(ckpt),
+            ))
+
+        assert ckpt.exists(), "checkpoint file was never written"
+        assert "TEST-POLO-BL" in ckpt.read_text()
+
+        # Second run over the same SKU should skip it entirely (resume).
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession:
+            MockSession.return_value = _make_mock_client({})
+            again = run_async(scrape_items(
+                [{"sku": "TEST-POLO-BL"}], "Neto", origin, None,
+                concurrency=1, delay_ms=0, checkpoint_path=str(ckpt),
+            ))
+        assert again == [], "already-done SKU should have been skipped"
+
+
 # ── Neto URL fallback ─────────────────────────────────────────────────────────
 
 class TestNetoUrlFallback:
     def test_falls_back_to_second_pattern_on_404(self):
-        """When /p/{sku} returns 404, the pipeline should try the next url_pattern."""
+        """When /p/{sku} returns 404, the pipeline should try the next url_pattern.
+
+        The shipped default is ["/p/{sku}"] alone — /buy/{sku} 404s on every store
+        we tested, so carrying it cost an extra request per discontinued SKU. The
+        fallback *mechanism* still matters for stores on other themes, so this
+        configures a second pattern explicitly rather than relying on the default.
+        """
         from scraper.pipeline import scrape_items
         from scraper.config import SITE_CONFIGS
 
-        if not SITE_CONFIGS.get("neto_default") or not getattr(SITE_CONFIGS["neto_default"], "url_patterns", []):
-            pytest.skip("url_patterns not yet configured on neto_default")
-
+        cfg = SITE_CONFIGS["neto_default"]
         valid_html = _read_fixture("neto_product_valid.html")
         origin = "https://store.example.com"
 
-        with patch("scraper.pipeline.requests.AsyncSession") as MockSession:
+        with patch.object(cfg, "url_patterns", ["/p/{sku}", "/buy/{sku}"]), \
+                patch("scraper.pipeline.requests.AsyncSession") as MockSession:
             mock_client = _make_mock_client(
                 {
                     "/p/TEST-POLO-BL": (404, "Not found", f"{origin}/p/TEST-POLO-BL"),

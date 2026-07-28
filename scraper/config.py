@@ -33,8 +33,9 @@ class SiteConfig:
 SITE_CONFIGS: Dict[str, SiteConfig] = {
     "neto_default": SiteConfig(
         base_domain="neto.generic",
-        # Primary URL pattern + fallback alternative used by some Neto store themes.
-        url_patterns=["/p/{sku}", "/buy/{sku}"],
+        # /buy/{sku} was a guess at an alternate Neto theme route; it 404s on every
+        # store tested, so it only bought a wasted request per dead SKU.
+        url_patterns=["/p/{sku}"],
         sku_selector="[itemprop='sku'], [itemprop='productID'], .sku, .product-sku, span[itemprop='sku']",
         sku_js_pattern=r"k4n\s*=\s*\{.*?sku\s*:\s*[\"']([^\"']+)[\"']",
         price_js_pattern=r"k4n\s*=\s*\{.*?price\s*:\s*[\"']([\d\.,]+)[\"']",

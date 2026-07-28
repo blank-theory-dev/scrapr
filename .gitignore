@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# Per-run checkpoints — scraped data, not source
+.scrapr_runs/
+
+# Scraped output and client input lists. This repo is PUBLIC, so supplier pricing
+# and part lists must not be committed. Keep them local.
+results.csv
+*_export.csv
+Machter*.csv

@@ -13,12 +13,8 @@ import nest_asyncio
 
 nest_asyncio.apply()
 
-from scraper.pipeline import scrape_items, scrape_by_page
+from scraper.pipeline import scrape_items
 from scraper.config import SITE_CONFIGS
-
-# Set SCRAPR_ENABLE_CRAWLER=1 in your env to expose the Page Crawler tab.
-# Production should leave this unset — the team uses SKU mode only.
-CRAWLER_ENABLED = os.getenv("SCRAPR_ENABLE_CRAWLER", "0").lower() in ("1", "true", "yes")
 
 
 def _run(coro):
@@ -28,6 +24,33 @@ def _run(coro):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
+
+
+def _load_checkpoint(path: str) -> List[Dict]:
+    """Rows saved by an earlier run of this origin, if any."""
+    if not os.path.exists(path):
+        return []
+    try:
+        df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    except Exception:
+        return []
+    rows = df.to_dict(orient="records")
+    for r in rows:
+        for k in ("price", "sale_price", "rrp", "discount_percent"):
+            v = r.get(k)
+            r[k] = float(v) if v not in (None, "") else None
+        for k, v in list(r.items()):
+            if v == "":
+                r[k] = None
+    return rows
+
+
+def _checkpoint_for(origin: str) -> str:
+    """Per-origin checkpoint file, kept next to the app so a killed run is recoverable."""
+    slug = "".join(c if c.isalnum() else "_" for c in (origin or "run"))[:60]
+    d = Path(".scrapr_runs")
+    d.mkdir(exist_ok=True)
+    return str(d / f"{slug}.csv")
 
 
 def _normalise_rows(rows: List[Dict[str, Optional[str]]]) -> List[Dict[str, Optional[str]]]:
@@ -139,20 +162,18 @@ def main():
         if logo.exists():
             st.image(str(logo), use_container_width=True)
 
-        if CRAWLER_ENABLED:
-            mode = st.radio("Mode", ["SKUs", "Page Crawler"])
-        else:
-            mode = "SKUs"
-            st.info("Running in SKU mode.")
-
         cms_choice = st.selectbox(
             "CMS / Site Type",
             ["Neto", "Shopify", "WordPress (WooCommerce)"],
             index=0,
         )
 
-        concurrency = 2
-        delay_ms = 400
+        # These stores' robots.txt asks for Crawl-delay: 1. Two workers sleeping
+        # 400ms each was ~5 req/s — impolite, and an independent reason to get
+        # blocked. At a few hundred SKUs, sequential costs minutes and buys
+        # reliability.
+        concurrency = 1
+        delay_ms = 1000
 
         fast_mode = False
         if cms_choice == "Shopify":
@@ -167,173 +188,171 @@ def main():
             st.cache_resource.clear()
             st.success("Cache cleared!")
 
-    # ── SKUs mode ─────────────────────────────────────────────────────────────
-    if mode == "SKUs":
-        origin = st.text_input("Base URL (Origin)", "https://legear.com.au").strip()
-        url_pattern = ""
+    origin = st.text_input("Base URL (Origin)", "https://legear.com.au").strip()
+    url_pattern = ""
 
-        tab1, tab2 = st.tabs(["Manual Input", "CSV Upload"])
-        sku_input = ""
-        csv_file = None
+    tab1, tab2 = st.tabs(["Manual Input", "CSV Upload"])
+    sku_input = ""
+    csv_file = None
 
-        with tab1:
-            sku_input = st.text_area(
-                "Enter SKUs (one per line)", height=150,
-                placeholder="ABC-123\nXYZ-789",
-            )
-
-        with tab2:
-            csv_file = st.file_uploader(
-                "Upload CSV (must have 'sku' or 'url' column)", type=["csv"]
-            )
-
-        if st.button("Scrape Items", use_container_width=True):
-            raw_rows: list = []
-
-            if csv_file:
-                try:
-                    df_in = pd.read_csv(csv_file, dtype=str, keep_default_na=False)
-                    raw_rows.extend(df_in.to_dict(orient="records"))
-                except Exception as e:
-                    st.error(f"Failed reading CSV: {e}")
-                    return
-
-            if sku_input.strip():
-                raw_rows.extend(
-                    [{"sku": s.strip()} for s in sku_input.splitlines() if s.strip()]
-                )
-
-            items = _normalise_rows(raw_rows)
-
-            if not items:
-                st.warning("Please provide at least one SKU or URL.")
-                return
-
-            indexer = None
-            if cms_choice == "Shopify" and origin:
-                from scraper.shopify_catalog import ShopifyCatalogIndexer
-
-                @st.cache_resource(ttl=3600, show_spinner="Indexing Shopify Catalog…")
-                def get_cached_indexer(url: str):
-                    idx = ShopifyCatalogIndexer(url)
-                    _run(idx.fetch_catalog())
-                    return idx
-
-                try:
-                    indexer = get_cached_indexer(origin)
-                    if not indexer.catalog:
-                        st.warning("Catalog download blocked (429). Switching to slow search mode.")
-                        indexer = None
-                    else:
-                        st.success(f"Using cached catalog ({len(indexer.catalog)} variants)")
-                except Exception as e:
-                    st.error(f"Failed to index catalog: {e}")
-                    indexer = None
-
-            # ── Live progress tracking ────────────────────────────────────────
-            total_items = len(items)
-            progress_bar = st.progress(0.0, text=f"Starting {total_items} items…")
-            status_line = st.empty()
-            error_tally = [0]
-            start_ts = [time.monotonic()]
-
-            def on_progress(completed: int, total: int, sku: str, state: str) -> None:
-                pct = completed / total if total > 0 else 1.0
-                elapsed = time.monotonic() - start_ts[0]
-                per_item = elapsed / completed if completed > 0 else 0
-                eta_s = int(per_item * (total - completed))
-                eta_str = (
-                    f"~{eta_s}s remaining"
-                    if completed < total and eta_s > 0
-                    else "finishing…"
-                )
-                if state == "failed":
-                    error_tally[0] += 1
-                icon = "✅" if state == "completed" else "❌"
-                progress_bar.progress(
-                    pct,
-                    text=f"{icon} {completed}/{total} — {eta_str}"
-                    + (f"  ({error_tally[0]} errors)" if error_tally[0] > 0 else ""),
-                )
-                if state == "failed":
-                    status_line.warning(f"❌ **{sku}** — failed (see error column)")
-                else:
-                    status_line.markdown(f"✅ **{sku}** — OK")
-
-            with st.spinner(""):
-                results = _run(
-                    scrape_items(
-                        items,
-                        cms_choice,
-                        origin,
-                        url_pattern,
-                        concurrency,
-                        delay_ms,
-                        indexer=indexer,
-                        fast_mode=fast_mode,
-                        on_progress=on_progress,
-                    )
-                )
-
-            progress_bar.empty()
-            status_line.empty()
-
-            st.session_state["sku_results"] = results
-
-            errors_count = sum(1 for r in results if r.get("error"))
-            elapsed_total = time.monotonic() - start_ts[0]
-            elapsed_str = f"{elapsed_total:.1f}s"
-
-            if errors_count > 0:
-                st.warning(
-                    f"Completed in {elapsed_str} — ⚠️ {errors_count}/{len(results)} items failed. "
-                    f"Check the **error** column below for details."
-                )
-                # Surface a summary of error types to help diagnose
-                error_types: dict = {}
-                for r in results:
-                    err = r.get("error") or ""
-                    key = err.split(":")[0].strip() if err else "unknown"
-                    error_types[key] = error_types.get(key, 0) + 1
-                with st.expander("Error breakdown"):
-                    for etype, count in sorted(error_types.items(), key=lambda x: -x[1]):
-                        st.markdown(f"- **{etype}**: {count} item(s)")
-            else:
-                st.success(f"Completed in {elapsed_str} — {len(results)} items scraped successfully.")
-
-        if "sku_results" in st.session_state and st.session_state["sku_results"]:
-            _render_results(st.session_state["sku_results"], "results.csv")
-        elif "sku_results" in st.session_state and not st.session_state["sku_results"]:
-            st.info("No results found.")
-
-    # ── Page Crawler mode (hidden by default) ─────────────────────────────────
-    elif mode == "Page Crawler":
-        st.info(
-            "Page Crawler mode is an advanced feature. "
-            "For routine scraping, use **SKUs** mode instead."
+    with tab1:
+        sku_input = st.text_area(
+            "Enter SKUs (one per line)", height=150,
+            placeholder="ABC-123\nXYZ-789",
         )
-        col1, col2 = st.columns(2)
-        with col1:
-            page_url = st.text_input("Category Page URL")
-        with col2:
-            max_items = st.number_input("Max Items", 1, 1000, 50)
 
-        if st.button("Crawl Page", use_container_width=True):
-            if not page_url:
-                st.warning("Please enter a URL.")
+    with tab2:
+        csv_file = st.file_uploader(
+            "Upload CSV (must have 'sku' or 'url' column)", type=["csv"]
+        )
+
+    fresh_run = st.checkbox(
+        "Re-fetch everything",
+        help="By default an interrupted run resumes where it stopped. "
+             "Tick this to ignore the saved rows and pull fresh prices.",
+    )
+
+    if st.button("Scrape Items", use_container_width=True):
+        raw_rows: list = []
+
+        if csv_file:
+            try:
+                df_in = pd.read_csv(csv_file, dtype=str, keep_default_na=False)
+                raw_rows.extend(df_in.to_dict(orient="records"))
+            except Exception as e:
+                st.error(f"Failed reading CSV: {e}")
                 return
 
-            with st.spinner("Crawling page…"):
-                results = _run(
-                    scrape_by_page(page_url, cms_choice, max_items, concurrency, delay_ms)
+        if sku_input.strip():
+            raw_rows.extend(
+                [{"sku": s.strip()} for s in sku_input.splitlines() if s.strip()]
+            )
+
+        items = _normalise_rows(raw_rows)
+
+        if not items:
+            st.warning("Please provide at least one SKU or URL.")
+            return
+
+        indexer = None
+        if cms_choice == "Shopify" and origin:
+            from scraper.shopify_catalog import ShopifyCatalogIndexer
+
+            @st.cache_resource(ttl=3600, show_spinner="Indexing Shopify Catalog…")
+            def get_cached_indexer(url: str):
+                idx = ShopifyCatalogIndexer(url)
+                _run(idx.fetch_catalog())
+                return idx
+
+            try:
+                indexer = get_cached_indexer(origin)
+                if not indexer.catalog:
+                    st.warning("Catalog download blocked (429). Switching to slow search mode.")
+                    indexer = None
+                else:
+                    st.success(f"Using cached catalog ({len(indexer.catalog)} variants)")
+            except Exception as e:
+                st.error(f"Failed to index catalog: {e}")
+                indexer = None
+
+        # ── Live progress tracking ────────────────────────────────────────
+        total_items = len(items)
+        progress_bar = st.progress(0.0, text=f"Starting {total_items} items…")
+        status_line = st.empty()
+        error_tally = [0]
+        start_ts = [time.monotonic()]
+
+        def on_progress(completed: int, total: int, sku: str, state: str) -> None:
+            pct = completed / total if total > 0 else 1.0
+            elapsed = time.monotonic() - start_ts[0]
+            per_item = elapsed / completed if completed > 0 else 0
+            eta_s = int(per_item * (total - completed))
+            eta_str = (
+                f"~{eta_s}s remaining"
+                if completed < total and eta_s > 0
+                else "finishing…"
+            )
+            if state == "failed":
+                error_tally[0] += 1
+            icon = "✅" if state == "completed" else "❌"
+            progress_bar.progress(
+                pct,
+                text=f"{icon} {completed}/{total} — {eta_str}"
+                + (f"  ({error_tally[0]} errors)" if error_tally[0] > 0 else ""),
+            )
+            if state == "failed":
+                status_line.warning(f"❌ **{sku}** — failed (see error column)")
+            else:
+                status_line.markdown(f"✅ **{sku}** — OK")
+
+        # Rows land here as they are scraped, so a crash, a closed tab or a
+        # Streamlit rerun can't discard a part-finished run. Re-running the
+        # same origin resumes instead of re-fetching.
+        checkpoint_path = _checkpoint_for(origin)
+        if fresh_run and os.path.exists(checkpoint_path):
+            os.remove(checkpoint_path)
+
+        recovered = _load_checkpoint(checkpoint_path)
+        if recovered:
+            st.info(
+                f"Resuming — {len(recovered)} row(s) from an earlier run are already "
+                "saved and will be reused. Tick **Re-fetch everything** to ignore them."
+            )
+
+        with st.spinner(""):
+            results = _run(
+                scrape_items(
+                    items,
+                    cms_choice,
+                    origin,
+                    url_pattern,
+                    concurrency,
+                    delay_ms,
+                    indexer=indexer,
+                    fast_mode=fast_mode,
+                    on_progress=on_progress,
+                    checkpoint_path=checkpoint_path,
                 )
-                st.session_state["crawl_results"] = results
+            )
 
-            errors = sum(1 for r in results if r.get("error"))
-            st.success(f"Crawled {len(results)} items." + (f" ({errors} errors)" if errors else ""))
+        progress_bar.empty()
+        status_line.empty()
 
-        if "crawl_results" in st.session_state and st.session_state["crawl_results"]:
-            _render_results(st.session_state["crawl_results"], "crawl_results.csv")
+        # Show everything the user asked for, not just what this pass fetched,
+        # so a resumed run still exports a complete file.
+        if recovered:
+            seen = {(r.get("sku") or "") for r in results}
+            results = results + [r for r in recovered if (r.get("sku") or "") not in seen]
+            order = {(r.get("sku") or ""): i for i, r in enumerate(items)}
+            results.sort(key=lambda d: order.get(d.get("sku") or "", len(order)))
+
+        st.session_state["sku_results"] = results
+
+        errors_count = sum(1 for r in results if r.get("error"))
+        elapsed_total = time.monotonic() - start_ts[0]
+        elapsed_str = f"{elapsed_total:.1f}s"
+
+        if errors_count > 0:
+            st.warning(
+                f"Completed in {elapsed_str} — ⚠️ {errors_count}/{len(results)} items failed. "
+                f"Check the **error** column below for details."
+            )
+            # Surface a summary of error types to help diagnose
+            error_types: dict = {}
+            for r in results:
+                err = r.get("error") or ""
+                key = err.split(":")[0].strip() if err else "unknown"
+                error_types[key] = error_types.get(key, 0) + 1
+            with st.expander("Error breakdown"):
+                for etype, count in sorted(error_types.items(), key=lambda x: -x[1]):
+                    st.markdown(f"- **{etype}**: {count} item(s)")
+        else:
+            st.success(f"Completed in {elapsed_str} — {len(results)} items scraped successfully.")
+
+    if "sku_results" in st.session_state and st.session_state["sku_results"]:
+        _render_results(st.session_state["sku_results"], "results.csv")
+    elif "sku_results" in st.session_state:
+        st.info("No results found.")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from typing import Optional, List
 from urllib.parse import urlparse, urljoin, unquote
 import json, re
 from .config import SiteConfig
+from . import structured
 
 def _clean_amount(s: Optional[str]) -> Optional[float]:
     if not s: return None
@@ -648,13 +649,26 @@ def parse_product(html: str, url: str, config: SiteConfig, sku: Optional[str] = 
         price = _extract_price(soup, config)
         sale_price = _extract_sale_price(soup, config)
         rrp = _extract_rrp(soup, config)
-        
-        # Adjust price and rrp if sale_price is present
+
+        # The page's own structured data backfills whatever the selectors missed.
+        # Gap-fill only: a site with tuned selectors keeps its current results,
+        # while a site nobody has configured still yields a usable row.
+        std, _ = structured.extract(html, url, soup)
+        sku = sku or std.get("sku")
+        name = name or std.get("name")
+        price = price if price is not None else std.get("price")
+        rrp = rrp if rrp is not None else std.get("rrp")
+        category = category or std.get("category")
+
+
+        # A sale price replaces the headline price, but only when it is actually
+        # lower. Sale selectors also match things like "Bundle price $99.00" on a
+        # $16 product, which used to overwrite the real price with a larger number.
         if sale_price is not None:
-            if price is not None and sale_price < price:
-                if not rrp or rrp < price:
+            if price is None or sale_price < price:
+                if price is not None and (not rrp or rrp < price):
                     rrp = price
-            price = sale_price
+                price = sale_price
         
         # Multi-image extraction
         all_images = _extract_all_images(soup, config, url)
@@ -665,13 +679,14 @@ def parse_product(html: str, url: str, config: SiteConfig, sku: Optional[str] = 
         # Extract IDs
         group_id, variant_id, all_variant_ids = _extract_shopify_ids(soup, sku)
 
+        # Arithmetic on this product's own price and RRP beats badge text, which
+        # is often a storewide banner ("EOFY 50% OFF") that has nothing to do
+        # with the item being scraped.
         discount = None
-        # Try badge extraction first (more accurate)
-        discount = _extract_discount_badge(soup, config)
-        
-        # If badge extraction failed, try calculating from price/rrp
-        if discount is None and price is not None and rrp is not None and rrp > 0 and price < rrp:
+        if price is not None and rrp is not None and rrp > 0 and price < rrp:
             discount = round((1 - (price / rrp)) * 100, 2)
+        if discount is None:
+            discount = _extract_discount_badge(soup, config)
 
         result = {
             "sku": sku,

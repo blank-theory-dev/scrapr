@@ -30,7 +30,7 @@ Every failed row in the output CSV now has an **error** column with a typed pref
 | `server_error:503` | Site is down or overloaded | Retry later |
 | `parse_empty` | Page loaded (200) but no product data extracted | Site may render products via JavaScript; try a different CMS config, or check the selector against the page HTML |
 | `parse_mismatch` | Page loaded but the SKU on the page ≠ requested SKU | The URL pattern may be wrong, or the SKU redirected to a different product |
-| `circuit_open` | 5+ consecutive requests to this domain were blocked | Domain has IP-blocked the session; wait, restart, or use a proxy |
+| `circuit_open` | 5+ consecutive **refusals** (403/429) — the network is blocked, not the data | Re-run from a residential connection. 404s no longer count toward this |
 | `request_failed` | Network-level error (DNS, timeout, etc.) | Check internet connection; site may be down |
 | `parse_timeout` | Parser took >30 s (very large page) | Report the URL; may need a whitelist exclusion |
 | `parse_error` | Unexpected exception in parser | Report as a bug — include the URL |
@@ -60,26 +60,55 @@ Every failed row in the output CSV now has an **error** column with a typed pref
 
 ### URL Patterns for Neto
 
-The scraper tries these patterns in order on 404:
-1. `/p/{sku}` (primary)
-2. `/buy/{sku}` (fallback)
+`/p/{sku}` is the only pattern tried by default. `/buy/{sku}` used to be a fallback but
+404s on every store tested, so it only bought a wasted request per discontinued SKU.
 
-If the store uses a different format (e.g. `/product/{sku}`), set it in `SITE_CONFIGS["neto_default"].url_patterns`.
+The fallback mechanism is still there: if a store uses a different format, add it to
+`SITE_CONFIGS["neto_default"].url_patterns` and it will be tried in order on a 404.
+
+### Interrupted runs
+
+Rows are written to `.scrapr_runs/<origin>.csv` as they are scraped. If a run dies you
+keep everything finished up to that point, and re-running the same origin resumes rather
+than re-fetching. Tick **Re-fetch everything** in the UI to start clean.
 
 ---
 
-## 5. Cloudflare Bypass Notes
+## 5. Cloudflare — where the blocking actually comes from
 
-This scraper uses `curl_cffi` with Chrome impersonation (`impersonate="chrome"`).  
-It also visits the homepage first to warm the session (set Cloudflare cookies).
+**The egress IP decides everything.** Measured 2026-07-28 against metavparts.com.au:
 
-**This is NOT a guaranteed bypass.** Cloudflare's latest JS challenges (`Just a moment…`) 
-require JavaScript execution and cannot be solved without a real browser. 
+| Client | From this Mac (residential AU) | From Streamlit Cloud (AWS) |
+|---|---|---|
+| plain `curl` (even with a Chrome UA) | 403 `cf-mitigated: challenge` | 403 |
+| `curl_cffi` `impersonate="chrome"` | **200** — no challenge issued | 403 |
 
-When the site uses this level of protection, your options are:
-- **Manual copy**: open each product page in a browser, copy the SKU data
-- **Browser automation**: Playwright/Selenium (significant setup)  
-- **Residential proxy services**: Route requests through ISP IPs (paid service)
+The same 16 SKUs that returned 0/16 on Streamlit Cloud returned **16/16 from a laptop
+with no code change at all**. The parser was never the problem.
+
+So: **run the app locally.** `streamlit run app.py` on a normal home/office connection.
+
+Things that do *not* work, so nobody re-litigates them:
+
+- **Headless browsers.** Playwright headless, bundled Chromium, 45s of patience, and
+  patchright with `navigator.webdriver=False` were all tested — all blocked. Headless
+  Chrome scores *worse* than `curl_cffi`, which has no JS engine at all. Cloudflare
+  scores the connection before the page paints; it is not asking you to run JS.
+- **Harvesting a `cf_clearance` cookie.** On a residential IP no challenge is issued, so
+  the cookie is never minted — there is nothing to hand off.
+- **Datacenter hosting.** AWS (Streamlit Cloud) and Azure (GitHub-hosted Actions runners)
+  are the same class of IP. An AU VPS is very likely the same; test with one `curl`
+  before spending an hour on it.
+
+If a hosted URL ever becomes mandatory, add a residential proxy to the one place that
+opens the session — `scraper/pipeline.py`, `requests.AsyncSession(...)`:
+
+```python
+requests.AsyncSession(impersonate="chrome", proxies={"https": PROXY_URL})
+```
+
+At this volume (~0.03 GB/month) a $5 non-expiring top-up lasts years. Skip the
+$49–149/month scraping APIs; they sell an IP you already have.
 
 ---
 
