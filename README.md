@@ -58,15 +58,17 @@ missing. Tick **Re-fetch everything** to ignore the saved rows and pull fresh pr
 
 ## Deployment
 
-**Run it on a normal connection, not a cloud host.** Cloudflare fronts these storefronts
-and scores datacenter IP addresses as bots before the page is even built, so a cloud
-deployment gets `403` on every request while the identical code succeeds from a laptop.
-Measured 2026-07-28: the same 16 SKUs returned 0/16 on Streamlit Community Cloud and
-16/16 locally, with no code change.
+**Run it on a normal connection, with a desktop session — not a cloud host.** Cloudflare
+fronts these storefronts and scores datacenter IPs as bots, so a cloud deployment gets
+`403` on every request while the identical code succeeds from a laptop.
 
-This is not fixable with a different HTTP client or a stealthier browser — headless Chrome
-is blocked where `curl_cffi` (no JavaScript engine at all) succeeds. `RUNBOOK.md` §5 has
-the full measurements and the dead ends, so nobody re-litigates them.
+Some of these stores also refuse the HTTP client outright. When that happens the run
+detects it and switches to driving a **real, visible Chrome window** (~2–3 s per SKU
+instead of well under a second). Headless does not work — that browser has to be on
+screen, which is the other reason this can't run on a server.
+
+Which clients these sites accept **has already flipped once** (see `RUNBOOK.md` §5 for
+both snapshots), so the tool probes rather than assumes.
 
 If a hosted URL is genuinely required, route the fetch layer through a residential proxy:
 add `proxies={"https": PROXY_URL}` to the `AsyncSession` in `scraper/pipeline.py`. At this

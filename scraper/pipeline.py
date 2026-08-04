@@ -5,6 +5,7 @@ import asyncio
 import csv
 import os
 import random
+from contextlib import AsyncExitStack
 from urllib.parse import urlparse
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -14,6 +15,7 @@ from bs4 import BeautifulSoup
 from .config import SITE_CONFIGS, SiteConfig
 from .parser import parse_product, _extract_sku as _extract_sku_from_html
 from .shopify_catalog import ShopifyCatalogIndexer
+from .browser_fetch import BrowserFetcher, BrowserUnavailable, is_block_status
 
 
 CMS_MAP = {
@@ -237,6 +239,19 @@ def _build_url_for_sku(
 # Main scraping entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
+async def _probe_origin(client: requests.AsyncSession, origin: str) -> Optional[int]:
+    """Status code from one hit on the origin, or None if it could not be reached.
+
+    Uses the run's own session so the answer reflects exactly what the scrape
+    will experience.
+    """
+    try:
+        r = await client.get(origin.rstrip("/") + "/", timeout=20.0, allow_redirects=True)
+        return r.status_code
+    except Exception:
+        return None
+
+
 async def _warm_session(client: requests.AsyncSession, origin: str) -> bool:
     """
     Visit the site homepage to pick up cookies and let Cloudflare mark the session
@@ -261,6 +276,8 @@ async def scrape_items(
     fast_mode: bool = False,
     on_progress: Optional[Callable] = None,
     checkpoint_path: Optional[str] = None,
+    allow_browser_fallback: bool = True,
+    on_notice: Optional[Callable] = None,
 ) -> List[Dict]:
     """
     Scrape a list of SKU/URL items.
@@ -272,6 +289,11 @@ async def scrape_items(
     an interrupted run leaves its completed work on disk instead of losing it.
     Items whose SKU is already in that file are skipped, which makes a re-run a
     resume.
+
+    allow_browser_fallback probes the origin once and, if the plain HTTP client
+    is refused, routes the whole run through a real Chrome window instead.
+    on_notice(message) is called if that happens, so a UI can explain the window
+    that just appeared and the slower pace that comes with it.
     """
     results: List[Dict] = []
     completed_count = 0
@@ -301,15 +323,42 @@ async def scrape_items(
             print(f"Catalog indexing failed: {e}")
             indexer = None
 
-    async with requests.AsyncSession(impersonate="chrome") as client:
+    # Decided once per run: if the plain HTTP client is refused at the door,
+    # every request goes through a real browser window instead. Costs one
+    # request when the site is fine, and saves the whole run when it isn't.
+    browser: Optional["BrowserFetcher"] = None
+    stack = AsyncExitStack()
+
+    async with stack:
+        client = await stack.enter_async_context(requests.AsyncSession(impersonate="chrome"))
+
+        if origin and allow_browser_fallback and is_block_status(await _probe_origin(client, origin)):
+            try:
+                browser = await stack.enter_async_context(BrowserFetcher())
+                if on_notice:
+                    on_notice(
+                        "This site is refusing the fast HTTP client, so the run is going "
+                        "through a real Chrome window instead. A window will open — leave "
+                        "it alone while it works. Expect a few seconds per SKU."
+                    )
+            except BrowserUnavailable as e:
+                if on_notice:
+                    on_notice(f"Site is blocking and no browser is available ({e}).")
+
+        async def do_fetch(u: str) -> Tuple[int, str, str]:
+            if browser is not None:
+                return await browser.fetch(u, delay_ms)
+            return await _fetch(client, u, delay_ms)
+
         # Warm the session with a homepage visit for Neto so Cloudflare's
         # first-party cookie is set before we begin hitting product pages.
-        if cms_choice == "Neto" and origin:
+        if cms_choice == "Neto" and origin and browser is None:
             await _warm_session(client, origin)
             if delay_ms:
                 await asyncio.sleep(max(delay_ms / 1000.0, 1.0))
 
-        sem = asyncio.Semaphore(concurrency)
+        # One browser, one page — concurrent navigations would fight over it.
+        sem = asyncio.Semaphore(1 if browser is not None else concurrency)
 
         async def handle(row: Dict[str, Optional[str]]) -> None:
             nonlocal completed_count
@@ -372,7 +421,7 @@ async def scrape_items(
                                 })
                                 return
 
-                            status, html, final_url = await _fetch(client, target_url, delay_ms)
+                            status, html, final_url = await do_fetch(target_url)
                             if status != 200:
                                 _append({
                                     "sku": sku, "url": url_in, "product_url": target_url,
@@ -468,7 +517,7 @@ async def scrape_items(
                                     ))
                                     return
 
-                            status, html, final_url = await _fetch(client, url, delay_ms)
+                            status, html, final_url = await do_fetch(url)
 
                             # Neto URL fallback chain: try alternative patterns on 404
                             if status == 404 and cms_choice == "Neto" and origin and sku:
@@ -480,7 +529,7 @@ async def scrape_items(
                                     if candidate in tried:
                                         continue
                                     tried.add(candidate)
-                                    fb_status, fb_html, fb_url = await _fetch(client, candidate, delay_ms)
+                                    fb_status, fb_html, fb_url = await do_fetch(candidate)
                                     if fb_status == 200:
                                         status, html, final_url = fb_status, fb_html, fb_url
                                         break

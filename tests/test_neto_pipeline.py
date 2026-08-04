@@ -283,6 +283,62 @@ class TestCircuitBreaker:
             "circuit breaker should trip on repeated 403s"
 
 
+# ── Browser fallback ──────────────────────────────────────────────────────────
+
+class TestBrowserFallback:
+    def test_blocked_origin_switches_to_the_browser(self):
+        """A site that refuses the HTTP client should be scraped via a browser.
+
+        These stores tightened on 2026-08-04 so that curl_cffi gets a 403 while
+        a real Chrome window gets 200, reversing what was true a week earlier.
+        """
+        from scraper.pipeline import scrape_items
+
+        valid_html = _read_fixture("neto_product_valid.html")
+        origin = "https://store.example.com"
+        cf = "<html><title>Just a moment...</title>cloudflare</html>"
+        fetched = []
+
+        class _FakeBrowser:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): pass
+            async def fetch(self, url, delay_ms=0):
+                fetched.append(url)
+                return 200, valid_html, url
+
+        notices = []
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession, \
+                patch("scraper.pipeline.BrowserFetcher", _FakeBrowser):
+            MockSession.return_value = _make_mock_client({"": (403, cf)})
+            results = run_async(
+                scrape_items([{"sku": "TEST-POLO-BL"}], "Neto", origin, None,
+                             concurrency=1, delay_ms=0, on_notice=notices.append)
+            )
+
+        assert fetched == [f"{origin}/p/TEST-POLO-BL"], fetched
+        assert results[0].get("error") is None, results[0].get("error")
+        assert notices and "Chrome" in notices[0]
+
+    def test_healthy_origin_does_not_launch_a_browser(self):
+        """The fast path must stay the default — no window for a site that works."""
+        from scraper.pipeline import scrape_items
+
+        valid_html = _read_fixture("neto_product_valid.html")
+
+        def _boom(*a, **k):
+            raise AssertionError("browser must not launch when the site is fine")
+
+        with patch("scraper.pipeline.requests.AsyncSession") as MockSession, \
+                patch("scraper.pipeline.BrowserFetcher", _boom):
+            MockSession.return_value = _make_mock_client({"": (200, valid_html)})
+            results = run_async(
+                scrape_items([{"sku": "TEST-POLO-BL"}], "Neto",
+                             "https://store.example.com", None,
+                             concurrency=1, delay_ms=0)
+            )
+        assert results[0].get("error") is None
+
+
 # ── Diagnosability of failures ────────────────────────────────────────────────
 
 class TestErrorRowsRecordTheUrl:

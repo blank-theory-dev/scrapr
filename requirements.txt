@@ -4,5 +4,8 @@ lxml
 pandas
 nest_asyncio
 curl-cffi
+# Needed only when a site refuses curl_cffi and the run falls back to driving a
+# real Chrome window. Also needs a one-off: playwright install chrome
+playwright
 pytest>=8.0
 pytest-asyncio>=0.23

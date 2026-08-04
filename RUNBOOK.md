@@ -74,41 +74,65 @@ than re-fetching. Tick **Re-fetch everything** in the UI to start clean.
 
 ---
 
-## 5. Cloudflare — where the blocking actually comes from
+## 5. Cloudflare — two variables, and they move
 
-**The egress IP decides everything.** Measured 2026-07-28 against metavparts.com.au:
+Blocking here depends on **the egress IP** and **what the site currently accepts**. The
+second one changes without warning, so treat any table below as a snapshot, not a law.
 
-| Client | From this Mac (residential AU) | From Streamlit Cloud (AWS) |
+**2026-07-28** — `curl_cffi` sailed through these stores from a residential IP:
+
+| Client | Residential AU | Streamlit Cloud (AWS) |
 |---|---|---|
-| plain `curl` (even with a Chrome UA) | 403 `cf-mitigated: challenge` | 403 |
-| `curl_cffi` `impersonate="chrome"` | **200** — no challenge issued | 403 |
+| plain `curl` (even with a Chrome UA) | 403 | 403 |
+| `curl_cffi` `impersonate="chrome"` | **200**, no challenge | 403 |
+| Playwright headless | 403 | — |
 
-The same 16 SKUs that returned 0/16 on Streamlit Cloud returned **16/16 from a laptop
-with no code change at all**. The parser was never the problem.
+**2026-08-04** — the same stores, same residential IP, one week later:
 
-So: **run the app locally.** `streamlit run app.py` on a normal home/office connection.
+| Client | Result |
+|---|---|
+| `curl_cffi`, all 8 impersonation profiles (chrome/safari/firefox/edge) | **403**, identical 5,987-byte challenge |
+| Playwright **headless** (channel=chrome) | **403** |
+| Playwright **headed** (channel=chrome) | **200**, no challenge issued |
+| `legear.com.au`, `cloudflare.com` from the same IP | **200** |
 
-Things that do *not* work, so nobody re-litigates them:
+So the IP was fine and the sites had tightened. Note this **reverses** the July finding:
+the client that used to work is now the one that fails, and the browser that used to fail
+is now the one that works. Do not assume either direction is permanent.
 
-- **Headless browsers.** Playwright headless, bundled Chromium, 45s of patience, and
-  patchright with `navigator.webdriver=False` were all tested — all blocked. Headless
-  Chrome scores *worse* than `curl_cffi`, which has no JS engine at all. Cloudflare
-  scores the connection before the page paints; it is not asking you to run JS.
-- **Harvesting a `cf_clearance` cookie.** On a residential IP no challenge is issued, so
-  the cookie is never minted — there is nothing to hand off.
-- **Datacenter hosting.** AWS (Streamlit Cloud) and Azure (GitHub-hosted Actions runners)
-  are the same class of IP. An AU VPS is very likely the same; test with one `curl`
-  before spending an hour on it.
+### What the code does about it
 
-If a hosted URL ever becomes mandatory, add a residential proxy to the one place that
-opens the session — `scraper/pipeline.py`, `requests.AsyncSession(...)`:
+`scrape_items` probes the origin once per run. If that probe comes back 403/429 it routes
+the entire run through a real Chrome window (`scraper/browser_fetch.py`) instead of the
+HTTP client, and calls `on_notice` so the UI can explain the window that just appeared.
+A healthy site never launches a browser and pays one extra request for the check.
+
+Cost when it does trigger: roughly **2–3 s per SKU** (one browser, one page, images and
+fonts aborted), versus well under a second on the fast path. 50 SKUs ≈ 2 minutes.
+
+**The window must be visible.** Headless is blocked, and this is not a flag you can patch
+around — headless detection is at the WebGL/canvas level. That means the browser path
+needs a desktop session, so it cannot run on a headless server or in cron.
+
+### Still dead ends
+
+- **Datacenter hosting.** AWS (Streamlit Cloud) and Azure (GitHub-hosted runners) are the
+  same class of IP. An AU VPS is very likely the same — test with one `curl` first. And a
+  server can't run the headed browser anyway.
+- **Harvesting `cf_clearance`.** When the browser passes, no challenge is issued, so the
+  cookie is never minted; there is nothing to hand to a faster client.
+
+### If the browser path stops working too
+
+Add a residential proxy to the one place that opens the session — `scraper/pipeline.py`,
+`requests.AsyncSession(...)`:
 
 ```python
 requests.AsyncSession(impersonate="chrome", proxies={"https": PROXY_URL})
 ```
 
 At this volume (~0.03 GB/month) a $5 non-expiring top-up lasts years. Skip the
-$49–149/month scraping APIs; they sell an IP you already have.
+$49–149/month scraping APIs; they mostly sell an IP you already have.
 
 ---
 

@@ -260,6 +260,7 @@ def main():
         total_items = len(items)
         progress_bar = st.progress(0.0, text=f"Starting {total_items} items…")
         status_line = st.empty()
+        notice_area = st.empty()  # explains the Chrome window if the run has to open one
         error_tally = [0]
         start_ts = [time.monotonic()]
 
@@ -313,6 +314,7 @@ def main():
                     fast_mode=fast_mode,
                     on_progress=on_progress,
                     checkpoint_path=checkpoint_path,
+                    on_notice=notice_area.warning,
                 )
             )
 
